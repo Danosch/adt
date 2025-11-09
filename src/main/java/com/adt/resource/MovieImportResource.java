@@ -8,14 +8,19 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 
 import com.adt.entity.dto.ImportResultDTO;
+import com.adt.entity.dto.ImportYearResultDTO;
 
 @Path("/import")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 public interface MovieImportResource {
 
-	@POST
-	@Path("/movies")
-	ImportResultDTO importMovies(@QueryParam("start") int startId, @QueryParam("end") int endId);
+    @POST
+    @Path("/movies")
+    ImportResultDTO importMovies(@QueryParam("start") int startId, @QueryParam("end") int endId);
+
+    @POST
+    @Path("/movies/years")
+    ImportYearResultDTO importMoviesFromYears(@QueryParam("year") int referenceYear);
 
 }
