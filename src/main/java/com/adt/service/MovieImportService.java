@@ -8,6 +8,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Types;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -113,10 +114,10 @@ public class MovieImportService {
 						JsonArray arr = json.getJsonArray("production_countries");
 						for (JsonValue v : arr) {
 							JsonObject pc = v.asJsonObject();
-							String iso = pc.getString("iso_3166_1", null);
-							String name = pc.getString("name", null);
-							if (iso != null)
-								upsertCountry(c, iso, (name == null || name.isBlank()) ? iso : name);
+                                                        String iso = normalizeIso2(pc.getString("iso_3166_1", null));
+                                                        String name = pc.getString("name", null);
+                                                        if (iso != null)
+                                                                upsertCountry(c, iso, (name == null || name.isBlank()) ? iso : name);
 						}
 					}
 
@@ -127,8 +128,8 @@ public class MovieImportService {
 							JsonObject pc = v.asJsonObject();
 							int pcTmdb = pc.getInt("id");
 							String n = pc.getString("name", null);
-							String oc = pc.getString("origin_country", null);
-							upsertProductionCompany(c, pcTmdb, n, oc);
+                                                        String oc = blankToNull(pc.getString("origin_country", null));
+                                                        upsertProductionCompany(c, pcTmdb, n, oc);
 						}
 					}
 
@@ -171,9 +172,9 @@ public class MovieImportService {
 						JsonArray arr = json.getJsonArray("production_countries");
 						for (JsonValue v : arr) {
 							JsonObject pc = v.asJsonObject();
-							String iso = pc.getString("iso_3166_1", null);
-							if (iso != null)
-								linkMovieCountry(c, moviePk, iso, productionTypeId);
+                                                        String iso = normalizeIso2(pc.getString("iso_3166_1", null));
+                                                        if (iso != null)
+                                                                linkMovieCountry(c, moviePk, iso, productionTypeId);
 						}
 					}
 
@@ -257,19 +258,22 @@ public class MovieImportService {
 			throws SQLException {
 		String oc = normalizeIso2(originCountry);
 
-		if (oc != null) {
-			upsertCountry(c, oc, oc);
-		}
+                if (oc != null) {
+                        upsertCountry(c, oc, oc);
+                }
 
-		try (PreparedStatement ps = c.prepareStatement(
-				"INSERT INTO production_company (tmdb_id, name, origin_country) VALUES (?, ?, ?) " +
-						"ON CONFLICT (tmdb_id) DO UPDATE SET name = EXCLUDED.name, origin_country = EXCLUDED.origin_country")) {
-			ps.setInt(1, tmdbId);
-			ps.setString(2, name);
-			ps.setString(3, originCountry);
-			ps.executeUpdate();
-		}
-	}
+                try (PreparedStatement ps = c.prepareStatement(
+                                "INSERT INTO production_company (tmdb_id, name, origin_country) VALUES (?, ?, ?) " +
+                                                "ON CONFLICT (tmdb_id) DO UPDATE SET name = EXCLUDED.name, origin_country = EXCLUDED.origin_country")) {
+                        ps.setInt(1, tmdbId);
+                        ps.setString(2, name);
+                        if (oc != null)
+                                ps.setString(3, oc);
+                        else
+                                ps.setNull(3, Types.VARCHAR);
+                        ps.executeUpdate();
+                }
+        }
 
 	private static Date toSqlDate(String s) {
 		if (s == null || s.isBlank())
@@ -377,12 +381,18 @@ public class MovieImportService {
 		}
 	}
 
-	private static String normalizeIso2(String s) {
-		if (s == null)
-			return null;
-		String t = s.trim();
-		return t.isEmpty() ? null : t;
-	}
+        private static String normalizeIso2(String s) {
+                if (s == null)
+                        return null;
+                String t = s.trim();
+                return t.isEmpty() ? null : t;
+        }
+
+        private static String blankToNull(String s) {
+                if (s == null)
+                        return null;
+                return s.isBlank() ? null : s;
+        }
 
 	// Hilfsmethode zum Nachschlagen einer ID anhand tmdb_id
 	private Long findIdByTmdb(Connection c, String table, int tmdbId) throws SQLException {
