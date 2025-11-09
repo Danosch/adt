@@ -33,18 +33,28 @@ public class MovieImportResourceImpl implements MovieImportResource {
         }
 
         @Override
-        public ImportYearResultDTO importMoviesFromYears(int referenceYear) {
-                if (referenceYear <= 0) {
-                        throw new BadRequestException("Parameter 'year' must be positive");
+        public ImportYearResultDTO importMoviesFromYears(int startYear, int endYear) {
+                if (startYear <= 0 || endYear <= 0) {
+                        throw new BadRequestException("Parameters 'startYear' and 'endYear' must be positive");
+                }
+                if (endYear < startYear) {
+                        throw new BadRequestException("Parameter 'endYear' must be >= 'startYear'");
                 }
 
-                var stats = importService.importMoviesForLastFortyYears(referenceYear);
-                int currentYear = Math.min(referenceYear, LocalDate.now().getYear());
-                int startYear = Math.min(Math.max(currentYear - 39, 1874), currentYear);
+                int currentYear = LocalDate.now().getYear();
+                int effectiveEndYear = Math.min(endYear, currentYear);
+                int effectiveStartYear = Math.max(startYear, 1874);
+
+                if (effectiveStartYear > effectiveEndYear) {
+                        throw new BadRequestException(
+                                        "Requested year range is outside the supported interval (>= 1874 and <= current year)");
+                }
+
+                var stats = importService.importMoviesForYearRange(effectiveStartYear, effectiveEndYear);
 
                 return new ImportYearResultDTO(
-                                startYear,
-                                currentYear,
+                                effectiveStartYear,
+                                effectiveEndYear,
                                 stats.getImported(),
                                 stats.getFailed(),
                                 stats.getDurationMillis(),

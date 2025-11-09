@@ -99,14 +99,22 @@ public class MovieImportService {
                 return new ImportStatsDTO(imported, failed, duration);
         }
 
-        public ImportStatsDTO importMoviesForLastFortyYears(int referenceYear) {
-                if (referenceYear <= 0) {
-                        throw new IllegalArgumentException("Parameter 'referenceYear' must be positive");
+        public ImportStatsDTO importMoviesForYearRange(int startYear, int endYear) {
+                if (startYear <= 0 || endYear <= 0) {
+                        throw new IllegalArgumentException("Parameters 'startYear' and 'endYear' must be positive");
+                }
+                if (endYear < startYear) {
+                        throw new IllegalArgumentException("Parameter 'endYear' must be >= 'startYear'");
                 }
 
                 int currentYear = LocalDate.now().getYear();
-                int endYear = Math.min(referenceYear, currentYear);
-                int startYear = Math.min(Math.max(endYear - 39, 1874), endYear);
+                int effectiveEndYear = Math.min(endYear, currentYear);
+                int effectiveStartYear = Math.max(startYear, 1874);
+
+                if (effectiveStartYear > effectiveEndYear) {
+                        throw new IllegalArgumentException(
+                                        "Requested year range is outside the supported interval (>= 1874 and <= current year)");
+                }
 
                 int imported = 0;
                 int failed = 0;

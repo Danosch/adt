@@ -21,6 +21,7 @@ public interface MovieImportResource {
 
     @POST
     @Path("/movies/years")
-    ImportYearResultDTO importMoviesFromYears(@QueryParam("year") int referenceYear);
-
+    ImportYearResultDTO importMoviesFromYears(
+                    @QueryParam("startYear") int startYear,
+                    @QueryParam("endYear") int endYear);
 }
