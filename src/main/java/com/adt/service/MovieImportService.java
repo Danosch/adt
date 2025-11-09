@@ -33,6 +33,30 @@ public class MovieImportService {
 
 	private final OkHttpClient http = new OkHttpClient();
 
+	private static final long MIN_CALL_INTERVAL_NANOS = 1_000_000_000L / 50; // 50 calls per second
+	private final Object rateLimitLock = new Object();
+	private long lastApiCallTime = 0L;
+
+	private void awaitRateLimit() {
+		synchronized (rateLimitLock) {
+			long now = System.nanoTime();
+			long earliestNextCall = lastApiCallTime + MIN_CALL_INTERVAL_NANOS;
+			if (earliestNextCall > now) {
+				long waitNanos = earliestNextCall - now;
+				long millis = waitNanos / 1_000_000L;
+				int nanos = (int) (waitNanos % 1_000_000L);
+				try {
+					Thread.sleep(millis, nanos);
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+					throw new RuntimeException("Interrupted while waiting for API rate limit", e);
+				}
+				now = System.nanoTime();
+			}
+			lastApiCallTime = Math.max(now, earliestNextCall);
+		}
+	}
+
 	private String token() {
 		String t = System.getenv("TMDB_API_TOKEN");
 		if (t == null || t.isBlank()) {
@@ -54,7 +78,7 @@ public class MovieImportService {
 		long start = System.currentTimeMillis();
 
 		for (int id = startId; id <= endId; id++) {
-			try {
+				try {
 				if (importOne(id))
 					imported++;
 				else
@@ -80,6 +104,8 @@ public class MovieImportService {
 				.addHeader("Authorization", "Bearer " + token())
 				.build();
 
+		awaitRateLimit();
+
 		try (Response resp = http.newCall(req).execute()) {
 			if (resp.code() == 404)
 				return false;
@@ -91,7 +117,7 @@ public class MovieImportService {
 
 			try (Connection c = ds.getConnection()) {
 				c.setAutoCommit(false);
-				try {
+					try {
 					// Lookup-Tabellen auffrischen
 					if (json.containsKey("original_language")) {
 						String iso = json.getString("original_language", null);
