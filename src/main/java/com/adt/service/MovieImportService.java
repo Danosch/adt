@@ -120,7 +120,7 @@ public class MovieImportService {
                 int failed = 0;
                 long start = System.currentTimeMillis();
 
-                for (int year = effectiveStartYear; year <= effectiveEndYear; year++) {
+                for (int year = startYear; year <= endYear; year++) {
                         int page = 1;
                         int totalPages = 1;
                         do {

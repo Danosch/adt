@@ -24,5 +24,4 @@ public interface MovieImportResource {
     ImportYearResultDTO importMoviesFromYears(
                     @QueryParam("startYear") int startYear,
                     @QueryParam("endYear") int endYear);
-
 }
