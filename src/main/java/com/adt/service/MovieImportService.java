@@ -39,14 +39,16 @@ public class MovieImportService {
 
         private final OkHttpClient http = new OkHttpClient();
 
-        private static final long MIN_CALL_INTERVAL_NANOS = 1_000_000_000L / 50; // 50 calls per second
+        private static final long DEFAULT_CALL_INTERVAL_NANOS = 1_000_000_000L / 50; // 50 calls per second
+        private final java.util.concurrent.atomic.AtomicLong callIntervalNanos = new java.util.concurrent.atomic.AtomicLong(
+                        DEFAULT_CALL_INTERVAL_NANOS);
         private final Object rateLimitLock = new Object();
         private long lastApiCallTime = 0L;
 
         private void awaitRateLimit() {
                 synchronized (rateLimitLock) {
                         long now = System.nanoTime();
-                        long earliestNextCall = lastApiCallTime + MIN_CALL_INTERVAL_NANOS;
+                        long earliestNextCall = lastApiCallTime + callIntervalNanos.get();
                         if (earliestNextCall > now) {
                                 long waitNanos = earliestNextCall - now;
                                 long millis = waitNanos / 1_000_000L;
@@ -79,6 +81,7 @@ public class MovieImportService {
                         throw new IllegalArgumentException("Parameter 'endId' must be >= 'startId'");
                 }
 
+                refreshApiRateLimit();
                 refreshMovieGenres();
 
                 int imported = 0;
@@ -118,6 +121,7 @@ public class MovieImportService {
                                         "Requested year range is outside the supported interval (>= 1874 and <= current year)");
                 }
 
+                refreshApiRateLimit();
                 refreshMovieGenres();
 
                 int imported = 0;
@@ -189,6 +193,7 @@ public class MovieImportService {
                 awaitRateLimit();
 
                 try (Response resp = http.newCall(req).execute()) {
+                        updateRateLimitFromResponse(resp);
                         if (resp.code() == 404)
                                 return null;
                         if (!resp.isSuccessful())
@@ -196,6 +201,39 @@ public class MovieImportService {
 
                         String body = resp.body().string();
                         return Json.createReader(new java.io.StringReader(body)).readObject();
+                }
+        }
+
+        private void refreshApiRateLimit() {
+                HttpUrl url = HttpUrl.parse("https://api.themoviedb.org/3/configuration").newBuilder()
+                                .addQueryParameter("language", "en-US")
+                                .build();
+
+                Request req = new Request.Builder()
+                                .url(url)
+                                .get()
+                                .addHeader("accept", "application/json")
+                                .addHeader("Authorization", "Bearer " + token())
+                                .build();
+
+                try (Response resp = http.newCall(req).execute()) {
+                        updateRateLimitFromResponse(resp);
+                } catch (Exception e) {
+                        callIntervalNanos.set(DEFAULT_CALL_INTERVAL_NANOS);
+                }
+        }
+
+        private void updateRateLimitFromResponse(Response response) {
+                String limitHeader = response.header("X-RateLimit-Limit");
+                if (limitHeader == null)
+                        return;
+                try {
+                        long perSecondLimit = Long.parseLong(limitHeader);
+                        if (perSecondLimit > 0) {
+                                callIntervalNanos.set(1_000_000_000L / perSecondLimit);
+                        }
+                } catch (NumberFormatException ignored) {
+                        callIntervalNanos.set(DEFAULT_CALL_INTERVAL_NANOS);
                 }
         }
 
@@ -307,46 +345,10 @@ public class MovieImportService {
                                 Long moviePk = upsertMovie(c, json);
                                 clearMovieRelations(c, moviePk);
 
-                                if (json.containsKey("genres")) {
-                                        JsonArray arr = json.getJsonArray("genres");
-                                        for (JsonValue v : arr) {
-                                                JsonObject g = v.asJsonObject();
-                                                Long genreId = findIdByTmdb(c, "genre", g.getInt("id"));
-                                                if (genreId != null)
-                                                        linkMovieGenre(c, moviePk, genreId);
-                                        }
-                                }
-
-                                if (json.containsKey("spoken_languages")) {
-                                        JsonArray arr = json.getJsonArray("spoken_languages");
-                                        for (JsonValue v : arr) {
-                                                JsonObject l = v.asJsonObject();
-                                                String iso = l.getString("iso_639_1", null);
-                                                if (iso != null)
-                                                        linkMovieSpokenLanguage(c, moviePk, iso);
-                                        }
-                                }
-
-                                if (json.containsKey("production_countries")) {
-                                        JsonArray arr = json.getJsonArray("production_countries");
-                                        for (JsonValue v : arr) {
-                                                JsonObject pc = v.asJsonObject();
-                                                String iso = normalizeIso2(pc.getString("iso_3166_1", null));
-                                                if (iso != null && productionTypeId != null)
-                                                        linkMovieCountry(c, moviePk, iso, productionTypeId);
-                                        }
-                                }
-
-                                if (json.containsKey("production_companies")) {
-                                        JsonArray arr = json.getJsonArray("production_companies");
-                                        for (JsonValue v : arr) {
-                                                JsonObject pc = v.asJsonObject();
-                                                int id = pc.getInt("id");
-                                                Long pcId = findIdByTmdb(c, "production_company", id);
-                                                if (pcId != null)
-                                                        linkMovieProductionCompany(c, moviePk, pcId);
-                                        }
-                                }
+                                linkMovieGenres(c, moviePk, json.getJsonArray("genres"));
+                                linkMovieSpokenLanguages(c, moviePk, json.getJsonArray("spoken_languages"));
+                                linkMovieCountries(c, moviePk, productionTypeId, json.getJsonArray("production_countries"));
+                                linkMovieProductionCompanies(c, moviePk, json.getJsonArray("production_companies"));
 
                                 replaceMovieTitles(c, moviePk, alternativeTitles);
                                 replaceMovieWatchProviders(c, moviePk, watchProviders);
@@ -605,62 +607,97 @@ public class MovieImportService {
         // ============================================================
         // Verknüpfungen (Relations)
         // ============================================================
-        private void linkMovieGenre(Connection c, Long movieId, Long genreId) throws SQLException {
+        private void linkMovieGenres(Connection c, Long movieId, JsonArray genres) throws SQLException {
+                if (genres == null || genres.isEmpty())
+                        return;
                 try (PreparedStatement ps = c.prepareStatement(
                                 "INSERT INTO movie_genre (movie_id, genre_id) VALUES (?, ?) "
                                                 + "ON CONFLICT (movie_id, genre_id) DO NOTHING")) {
-                        ps.setLong(1, movieId);
-                        ps.setLong(2, genreId);
-                        ps.executeUpdate();
+                        for (JsonValue v : genres) {
+                                JsonObject g = v.asJsonObject();
+                                Long genreId = findIdByTmdb(c, "genre", g.getInt("id"));
+                                if (genreId == null)
+                                        continue;
+                                ps.setLong(1, movieId);
+                                ps.setLong(2, genreId);
+                                ps.addBatch();
+                        }
+                        ps.executeBatch();
                 }
         }
 
-        private void linkMovieSpokenLanguage(Connection c, Long movieId, String iso639_1) throws SQLException {
+        private void linkMovieSpokenLanguages(Connection c, Long movieId, JsonArray languages) throws SQLException {
+                if (languages == null || languages.isEmpty())
+                        return;
+                Set<String> inserted = new HashSet<>();
                 try (PreparedStatement ps = c.prepareStatement(
                                 "INSERT INTO movie_spoken_language (movie_id, iso_639_1) VALUES (?, ?) "
                                                 + "ON CONFLICT (movie_id, iso_639_1) DO NOTHING")) {
-                        ps.setLong(1, movieId);
-                        ps.setString(2, iso639_1);
-                        ps.executeUpdate();
+                        for (JsonValue v : languages) {
+                                JsonObject l = v.asJsonObject();
+                                String iso = l.getString("iso_639_1", null);
+                                if (iso == null || !inserted.add(iso))
+                                        continue;
+                                ps.setLong(1, movieId);
+                                ps.setString(2, iso);
+                                ps.addBatch();
+                        }
+                        ps.executeBatch();
                 }
         }
 
-        private void linkMovieCountry(Connection c, Long movieId, String iso3166_1, Long countryTypeId)
+        private void linkMovieCountries(Connection c, Long movieId, Long countryTypeId, JsonArray countries)
                         throws SQLException {
+                if (countryTypeId == null || countries == null || countries.isEmpty())
+                        return;
+                Set<String> inserted = new HashSet<>();
                 try (PreparedStatement ps = c.prepareStatement(
                                 "INSERT INTO movie_country (movie_id, iso_3166_1, country_type_id) VALUES (?, ?, ?) "
                                                 + "ON CONFLICT (movie_id, iso_3166_1, country_type_id) DO NOTHING")) {
-                        ps.setLong(1, movieId);
-                        ps.setString(2, iso3166_1);
-                        ps.setLong(3, countryTypeId);
-                        ps.executeUpdate();
+                        for (JsonValue v : countries) {
+                                JsonObject pc = v.asJsonObject();
+                                String iso = normalizeIso2(pc.getString("iso_3166_1", null));
+                                if (iso == null || !inserted.add(iso))
+                                        continue;
+                                ps.setLong(1, movieId);
+                                ps.setString(2, iso);
+                                ps.setLong(3, countryTypeId);
+                                ps.addBatch();
+                        }
+                        ps.executeBatch();
                 }
         }
 
-        private void linkMovieProductionCompany(Connection c, Long movieId, Long pcId) throws SQLException {
+        private void linkMovieProductionCompanies(Connection c, Long movieId, JsonArray companies) throws SQLException {
+                if (companies == null || companies.isEmpty())
+                        return;
+                Set<Long> inserted = new HashSet<>();
                 try (PreparedStatement ps = c.prepareStatement(
                                 "INSERT INTO movie_production_company (movie_id, production_company_id) VALUES (?, ?) "
                                                 + "ON CONFLICT (movie_id, production_company_id) DO NOTHING")) {
-                        ps.setLong(1, movieId);
-                        ps.setLong(2, pcId);
-                        ps.executeUpdate();
+                        for (JsonValue v : companies) {
+                                JsonObject pc = v.asJsonObject();
+                                Long pcId = findIdByTmdb(c, "production_company", pc.getInt("id"));
+                                if (pcId == null || !inserted.add(pcId))
+                                        continue;
+                                ps.setLong(1, movieId);
+                                ps.setLong(2, pcId);
+                                ps.addBatch();
+                        }
+                        ps.executeBatch();
                 }
         }
 
-        private void linkMovieWatchProvider(Connection c, Long movieId, Long providerId, String type, String link)
-                        throws SQLException {
-                try (PreparedStatement ps = c.prepareStatement(
-                                "INSERT INTO movie_watch_provider (movie_id, provider_id, type, link) VALUES (?, ?, ?, ?) "
-                                                + "ON CONFLICT (movie_id, provider_id, type) DO UPDATE SET link = EXCLUDED.link")) {
-                        ps.setLong(1, movieId);
-                        ps.setLong(2, providerId);
-                        ps.setString(3, type);
-                        if (link != null)
-                                ps.setString(4, link);
-                        else
-                                ps.setNull(4, Types.VARCHAR);
-                        ps.executeUpdate();
-                }
+        private void linkMovieWatchProvider(Connection c, PreparedStatement ps, Long movieId, Long providerId,
+                        String type, String link) throws SQLException {
+                ps.setLong(1, movieId);
+                ps.setLong(2, providerId);
+                ps.setString(3, type);
+                if (link != null)
+                        ps.setString(4, link);
+                else
+                        ps.setNull(4, Types.VARCHAR);
+                ps.addBatch();
         }
 
         private void replaceMovieTitles(Connection c, Long movieId, JsonObject alternativeTitles) throws SQLException {
@@ -703,25 +740,30 @@ public class MovieImportService {
                 JsonObject results = watchProviders.getJsonObject("results");
                 if (results == null)
                         return;
-                for (String regionCode : results.keySet()) {
-                        String iso = normalizeIso2(regionCode);
-                        if (iso == null)
-                                continue;
-                        upsertCountry(c, iso, iso);
-                        JsonObject region = results.getJsonObject(regionCode);
-                        if (region == null)
-                                continue;
-                        String link = blankToNull(region.getString("link", null));
-                        processWatchProviderType(c, movieId, iso, link, region, "flatrate");
-                        processWatchProviderType(c, movieId, iso, link, region, "buy");
-                        processWatchProviderType(c, movieId, iso, link, region, "rent");
-                        processWatchProviderType(c, movieId, iso, link, region, "ads");
-                        processWatchProviderType(c, movieId, iso, link, region, "free");
+                try (PreparedStatement ps = c.prepareStatement(
+                                "INSERT INTO movie_watch_provider (movie_id, provider_id, type, link) VALUES (?, ?, ?, ?) "
+                                                + "ON CONFLICT (movie_id, provider_id, type) DO UPDATE SET link = EXCLUDED.link")) {
+                        for (String regionCode : results.keySet()) {
+                                String iso = normalizeIso2(regionCode);
+                                if (iso == null)
+                                        continue;
+                                upsertCountry(c, iso, iso);
+                                JsonObject region = results.getJsonObject(regionCode);
+                                if (region == null)
+                                        continue;
+                                String link = blankToNull(region.getString("link", null));
+                                processWatchProviderType(c, ps, movieId, iso, link, region, "flatrate");
+                                processWatchProviderType(c, ps, movieId, iso, link, region, "buy");
+                                processWatchProviderType(c, ps, movieId, iso, link, region, "rent");
+                                processWatchProviderType(c, ps, movieId, iso, link, region, "ads");
+                                processWatchProviderType(c, ps, movieId, iso, link, region, "free");
+                        }
+                        ps.executeBatch();
                 }
         }
 
-        private void processWatchProviderType(Connection c, Long movieId, String region, String link, JsonObject regionData,
-                        String type) throws Exception {
+        private void processWatchProviderType(Connection c, PreparedStatement ps, Long movieId, String region, String link,
+                        JsonObject regionData, String type) throws Exception {
                 if (!regionData.containsKey(type))
                         return;
                 JsonArray providers = regionData.getJsonArray(type);
@@ -731,7 +773,7 @@ public class MovieImportService {
                         JsonObject provider = value.asJsonObject();
                         Long providerId = upsertWatchProvider(c, provider, region);
                         if (providerId != null)
-                                linkMovieWatchProvider(c, movieId, providerId, type, link);
+                                linkMovieWatchProvider(c, ps, movieId, providerId, type, link);
                 }
         }
 
@@ -740,16 +782,17 @@ public class MovieImportService {
                 clearMovieRelation(c, "movie_cast", movieId);
                 if (cast == null)
                         return;
-                for (JsonValue value : cast) {
-                        JsonObject member = value.asJsonObject();
-                        Long personId = ensurePerson(c, member, personCache);
-                        if (personId == null)
-                                continue;
-                        String character = blankToNull(member.getString("character", null));
-                        Integer order = member.containsKey("order") && !member.isNull("order") ? member.getInt("order")
-                                        : null;
-                        try (PreparedStatement ps = c.prepareStatement(
-                                        "INSERT INTO movie_cast (movie_id, person_id, character_name, cast_order) VALUES (?, ?, ?, ?)")) {
+                try (PreparedStatement ps = c.prepareStatement(
+                                "INSERT INTO movie_cast (movie_id, person_id, character_name, cast_order) VALUES (?, ?, ?, ?)")) {
+                        for (JsonValue value : cast) {
+                                JsonObject member = value.asJsonObject();
+                                Long personId = ensurePerson(c, member, personCache);
+                                if (personId == null)
+                                        continue;
+                                String character = blankToNull(member.getString("character", null));
+                                Integer order = member.containsKey("order") && !member.isNull("order")
+                                                ? member.getInt("order")
+                                                : null;
                                 ps.setLong(1, movieId);
                                 ps.setLong(2, personId);
                                 if (character != null)
@@ -760,8 +803,9 @@ public class MovieImportService {
                                         ps.setInt(4, order);
                                 else
                                         ps.setNull(4, Types.INTEGER);
-                                ps.executeUpdate();
+                                ps.addBatch();
                         }
+                        ps.executeBatch();
                 }
         }
 
@@ -771,29 +815,30 @@ public class MovieImportService {
                 if (crew == null)
                         return;
                 Set<String> inserted = new HashSet<>();
-                for (JsonValue value : crew) {
-                        JsonObject member = value.asJsonObject();
-                        String departmentName = blankToNull(member.getString("department", null));
-                        String jobName = blankToNull(member.getString("job", null));
-                        if (departmentName == null || jobName == null)
-                                continue;
-                        Long departmentId = upsertDepartment(c, departmentName);
-                        Long jobId = upsertJob(c, departmentId, jobName);
-                        if (jobId == null)
-                                continue;
-                        Long personId = ensurePerson(c, member, personCache);
-                        if (personId == null)
-                                continue;
-                        String key = movieId + ":" + personId + ":" + jobId;
-                        if (!inserted.add(key))
-                                continue;
-                        try (PreparedStatement ps = c.prepareStatement(
-                                        "INSERT INTO movie_crew (movie_id, person_id, job_id) VALUES (?, ?, ?)")) {
+                try (PreparedStatement ps = c.prepareStatement(
+                                "INSERT INTO movie_crew (movie_id, person_id, job_id) VALUES (?, ?, ?)")) {
+                        for (JsonValue value : crew) {
+                                JsonObject member = value.asJsonObject();
+                                String departmentName = blankToNull(member.getString("department", null));
+                                String jobName = blankToNull(member.getString("job", null));
+                                if (departmentName == null || jobName == null)
+                                        continue;
+                                Long departmentId = upsertDepartment(c, departmentName);
+                                Long jobId = upsertJob(c, departmentId, jobName);
+                                if (jobId == null)
+                                        continue;
+                                Long personId = ensurePerson(c, member, personCache);
+                                if (personId == null)
+                                        continue;
+                                String key = movieId + ":" + personId + ":" + jobId;
+                                if (!inserted.add(key))
+                                        continue;
                                 ps.setLong(1, movieId);
                                 ps.setLong(2, personId);
                                 ps.setLong(3, jobId);
-                                ps.executeUpdate();
+                                ps.addBatch();
                         }
+                        ps.executeBatch();
                 }
         }
 
