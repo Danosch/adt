@@ -79,6 +79,8 @@ public class MovieImportService {
                         throw new IllegalArgumentException("Parameter 'endId' must be >= 'startId'");
                 }
 
+                refreshMovieGenres();
+
                 int imported = 0;
                 int failed = 0;
                 long start = System.currentTimeMillis();
@@ -115,6 +117,8 @@ public class MovieImportService {
                         throw new IllegalArgumentException(
                                         "Requested year range is outside the supported interval (>= 1874 and <= current year)");
                 }
+
+                refreshMovieGenres();
 
                 int imported = 0;
                 int failed = 0;
@@ -192,6 +196,31 @@ public class MovieImportService {
 
                         String body = resp.body().string();
                         return Json.createReader(new java.io.StringReader(body)).readObject();
+                }
+        }
+
+        private void refreshMovieGenres() {
+                try {
+                        HttpUrl url = HttpUrl.parse("https://api.themoviedb.org/3/genre/movie/list").newBuilder()
+                                        .addQueryParameter("language", "en-US")
+                                        .build();
+
+                        JsonObject response = getJson(url.toString());
+                        if (response == null || !response.containsKey("genres"))
+                                return;
+
+                        JsonArray genres = response.getJsonArray("genres");
+                        if (genres == null || genres.isEmpty())
+                                return;
+
+                        try (Connection c = ds.getConnection()) {
+                                for (JsonValue value : genres) {
+                                        JsonObject genre = value.asJsonObject();
+                                        upsertGenre(c, genre.getInt("id"), genre.getString("name", null));
+                                }
+                        }
+                } catch (Exception e) {
+                        System.err.println("❌ Failed to refresh genre list: " + e.getMessage());
                 }
         }
 

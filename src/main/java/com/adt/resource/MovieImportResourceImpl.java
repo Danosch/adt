@@ -60,4 +60,5 @@ public class MovieImportResourceImpl implements MovieImportResource {
                                 stats.getDurationMillis(),
                                 "Import finished");
         }
+
 }
