@@ -11,9 +11,12 @@ import jakarta.persistence.UniqueConstraint;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Gesprochene Sprachen eines Films.
+ */
 @Entity
 @Table(name = "movie_spoken_language", uniqueConstraints = @UniqueConstraint(name = "uq_msl", columnNames = {
-		"movie_id", "iso_639_1" }))
+                "movie_id", "iso_639_1" }))
 @Getter
 @Setter
 public class MovieSpokenLanguage {

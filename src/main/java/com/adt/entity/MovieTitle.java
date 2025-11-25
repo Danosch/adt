@@ -10,6 +10,9 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Alternative Titel eines Films je Region und Typ.
+ */
 @Entity
 @Table(name = "movie_title")
 @Getter

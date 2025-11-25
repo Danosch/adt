@@ -10,6 +10,9 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Alternativnamen/Aliase einer Person.
+ */
 @Entity
 @Table(name = "person_alias")
 @Getter

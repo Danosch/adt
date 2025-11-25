@@ -31,6 +31,10 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 
+/**
+ * Zentraler Service, der Filme und verwandte Daten aus der TMDB-API abruft und
+ * in der Datenbank persistiert.
+ */
 @ApplicationScoped
 public class MovieImportService {
 
@@ -45,6 +49,10 @@ public class MovieImportService {
         private final Object rateLimitLock = new Object();
         private long lastApiCallTime = 0L;
 
+        /**
+         * Wartet bei Bedarf, um die aus den TMDB-Headern abgeleiteten
+         * Ratenlimit-Vorgaben einzuhalten.
+         */
         private void awaitRateLimit() {
                 synchronized (rateLimitLock) {
                         long now = System.nanoTime();
@@ -65,6 +73,10 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Liefert das für API-Aufrufe benötigte Token aus den Umgebungsvariablen
+         * oder wirft eine Exception, wenn es fehlt.
+         */
         private String token() {
                 String t = System.getenv("TMDB_API_TOKEN");
                 if (t == null || t.isBlank()) {
@@ -76,6 +88,10 @@ public class MovieImportService {
         // ============================================================
         // Hauptmethoden (werden vom Resource-Endpoint aufgerufen)
         // ============================================================
+        /**
+         * Importiert eine durch TMDB-IDs definierte Reihe von Filmen, sammelt
+         * dabei Erfolgs- und Fehlerzähler und misst die Laufzeit.
+         */
         public ImportStatsDTO importMovieRangeWithStats(int startId, int endId) {
                 if (endId < startId) {
                         throw new IllegalArgumentException("Parameter 'endId' must be >= 'startId'");
@@ -104,6 +120,10 @@ public class MovieImportService {
                 return new ImportStatsDTO(imported, failed, duration);
         }
 
+        /**
+         * Durchsucht die TMDB-Discover-API nach Filmen in einem
+         * Veröffentlichungsjahresbereich und importiert alle Treffer.
+         */
         public ImportStatsDTO importMoviesForYearRange(int startYear, int endYear) {
                 if (startYear <= 0 || endYear <= 0) {
                         throw new IllegalArgumentException("Parameters 'startYear' and 'endYear' must be positive");
@@ -182,6 +202,10 @@ public class MovieImportService {
         // ============================================================
         // HTTP-Helfer
         // ============================================================
+        /**
+         * Führt einen GET-Request aus, berücksichtigt die Rate-Limits und gibt den
+         * JSON-Body zurück.
+         */
         private JsonObject getJson(String url) throws Exception {
                 Request req = new Request.Builder()
                                 .url(url)
@@ -204,6 +228,10 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Ruft die Konfigurations-Route auf, um aktuelle Rate-Limit-Header
+         * einzulesen und das lokale Limit anzupassen.
+         */
         private void refreshApiRateLimit() {
                 HttpUrl url = HttpUrl.parse("https://api.themoviedb.org/3/configuration").newBuilder()
                                 .addQueryParameter("language", "en-US")
@@ -223,6 +251,9 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Passt das interne Ratenlimit anhand des API-Response-Headers an.
+         */
         private void updateRateLimitFromResponse(Response response) {
                 String limitHeader = response.header("X-RateLimit-Limit");
                 if (limitHeader == null)
@@ -237,6 +268,10 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Synchronisiert die bekannte Genre-Liste mit TMDB und legt fehlende
+         * Einträge in der Datenbank an.
+         */
         private void refreshMovieGenres() {
                 try {
                         HttpUrl url = HttpUrl.parse("https://api.themoviedb.org/3/genre/movie/list").newBuilder()
@@ -262,6 +297,9 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Lädt Detaildaten einer Person aus TMDB.
+         */
         private JsonObject fetchPersonDetails(int tmdbId) throws Exception {
                 HttpUrl url = HttpUrl.parse("https://api.themoviedb.org/3/person/" + tmdbId).newBuilder()
                                 .addQueryParameter("language", "en-US")
@@ -272,6 +310,13 @@ public class MovieImportService {
         // ============================================================
         // Einzelimport eines Movies
         // ============================================================
+        /**
+         * Lädt einen einzelnen Film inklusive Credits, alternativer Titel und
+         * Watch-Provider und schreibt alle verknüpften Entitäten in die Datenbank.
+         * 
+         * @param tmdbId TMDB-ID des Films
+         * @return {@code true}, wenn Daten gefunden wurden und gespeichert werden konnten
+         */
         private boolean importOne(int tmdbId) throws Exception {
                 HttpUrl url = HttpUrl.parse("https://api.themoviedb.org/3/movie/" + tmdbId).newBuilder()
                                 .addQueryParameter("language", "en-US")
@@ -377,6 +422,9 @@ public class MovieImportService {
         // ============================================================
         // UPSERT-Helfer
         // ============================================================
+        /**
+         * Legt ein Genre an oder aktualisiert dessen Namen anhand der TMDB-ID.
+         */
         private void upsertGenre(Connection c, int tmdbId, String name) throws SQLException {
                 try (PreparedStatement ps = c.prepareStatement(
                                 "INSERT INTO genre (tmdb_id, name) VALUES (?, ?) "
@@ -387,6 +435,9 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Legt eine Sprache an oder aktualisiert vorhandene Felder anhand des ISO-639-1-Codes.
+         */
         private void upsertLanguage(Connection c, String iso639_1, String englishName, String name) throws SQLException {
                 try (PreparedStatement ps = c.prepareStatement(
                                 "INSERT INTO language (iso_639_1, english_name, name) VALUES (?, ?, ?) "
@@ -400,6 +451,9 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Legt ein Land an oder aktualisiert den Anzeigenamen anhand des ISO-3166-1-Codes.
+         */
         private void upsertCountry(Connection c, String iso3166_1, String name) throws SQLException {
                 try (PreparedStatement ps = c.prepareStatement(
                                 "INSERT INTO country (iso_3166_1, name) VALUES (?, ?) "
@@ -410,6 +464,9 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Stellt sicher, dass ein Country-Type existiert und liefert seine ID.
+         */
         private Long upsertCountryType(Connection c, String code, String desc) throws SQLException {
                 try (PreparedStatement ps = c.prepareStatement(
                                 "INSERT INTO country_type (code, description) VALUES (?, ?) "
@@ -428,6 +485,9 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Legt ein Produktionsstudio an oder aktualisiert die bestehenden Daten.
+         */
         private void upsertProductionCompany(Connection c, int tmdbId, String name, String originCountry)
                         throws SQLException {
                 String oc = normalizeIso2(originCountry);
@@ -449,6 +509,9 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Sorgt dafür, dass eine Department-Zeile existiert und gibt die ID zurück.
+         */
         private Long upsertDepartment(Connection c, String name) throws SQLException {
                 if (name == null)
                         return null;
@@ -467,6 +530,9 @@ public class MovieImportService {
                 return null;
         }
 
+        /**
+         * Stellt sicher, dass ein Job innerhalb eines Departments existiert.
+         */
         private Long upsertJob(Connection c, Long departmentId, String name) throws SQLException {
                 if (departmentId == null || name == null)
                         return null;
@@ -488,6 +554,9 @@ public class MovieImportService {
                 return null;
         }
 
+        /**
+         * Legt eine Person an oder aktualisiert sie mit allen verfügbaren Stammdaten.
+         */
         private Long upsertPerson(Connection c, int tmdbId, String imdbId, String name, Integer gender,
                         Long knownForDepartmentId, String biography, Date birthday, Date deathday, String placeOfBirth,
                         String homepage, Boolean adult, BigDecimal popularity) throws SQLException {
@@ -549,6 +618,9 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Legt einen Watch-Provider für eine Region an oder aktualisiert ihn.
+         */
         private Long upsertWatchProvider(Connection c, JsonObject provider, String region) throws SQLException {
                 if (region == null)
                         return null;
@@ -575,6 +647,9 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Ersetzt die Alias-Liste einer Person vollständig durch die Angaben aus dem Detail-Response.
+         */
         private void replacePersonAliases(Connection c, Long personId, JsonObject detail) throws SQLException {
                 try (PreparedStatement delete = c.prepareStatement("DELETE FROM person_alias WHERE person_id = ?")) {
                         delete.setLong(1, personId);
@@ -607,6 +682,9 @@ public class MovieImportService {
         // ============================================================
         // Verknüpfungen (Relations)
         // ============================================================
+        /**
+         * Verknüpft einen Film mit allen Genres aus dem JSON-Response.
+         */
         private void linkMovieGenres(Connection c, Long movieId, JsonArray genres) throws SQLException {
                 if (genres == null || genres.isEmpty())
                         return;
@@ -626,6 +704,9 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Verknüpft Sprachen mit einem Film, wobei doppelte ISO-Codes vermieden werden.
+         */
         private void linkMovieSpokenLanguages(Connection c, Long movieId, JsonArray languages) throws SQLException {
                 if (languages == null || languages.isEmpty())
                         return;
@@ -646,6 +727,9 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Speichert Produktionsländer für einen Film.
+         */
         private void linkMovieCountries(Connection c, Long movieId, Long countryTypeId, JsonArray countries)
                         throws SQLException {
                 if (countryTypeId == null || countries == null || countries.isEmpty())
@@ -668,6 +752,9 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Verknüpft Produktionsfirmen mit einem Film.
+         */
         private void linkMovieProductionCompanies(Connection c, Long movieId, JsonArray companies) throws SQLException {
                 if (companies == null || companies.isEmpty())
                         return;
@@ -688,6 +775,9 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Fügt eine konkrete Anbieter-Zeile in der Join-Tabelle hinzu.
+         */
         private void linkMovieWatchProvider(Connection c, PreparedStatement ps, Long movieId, Long providerId,
                         String type, String link) throws SQLException {
                 ps.setLong(1, movieId);
@@ -700,6 +790,9 @@ public class MovieImportService {
                 ps.addBatch();
         }
 
+        /**
+         * Ersetzt alle alternativen Titel eines Films durch die in TMDB gelieferten.
+         */
         private void replaceMovieTitles(Connection c, Long movieId, JsonObject alternativeTitles) throws SQLException {
                 clearMovieRelation(c, "movie_title", movieId);
                 if (alternativeTitles == null || !alternativeTitles.containsKey("titles"))
@@ -733,6 +826,9 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Ersetzt alle Watch-Provider-Einträge eines Films in allen Regionen.
+         */
         private void replaceMovieWatchProviders(Connection c, Long movieId, JsonObject watchProviders) throws Exception {
                 clearMovieRelation(c, "movie_watch_provider", movieId);
                 if (watchProviders == null || !watchProviders.containsKey("results"))
@@ -762,6 +858,9 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Verarbeitet eine einzelne Anbieter-Kategorie (z. B. Kauf oder Flatrate).
+         */
         private void processWatchProviderType(Connection c, PreparedStatement ps, Long movieId, String region, String link,
                         JsonObject regionData, String type) throws Exception {
                 if (!regionData.containsKey(type))
@@ -777,6 +876,9 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Ersetzt die gesamte Besetzung eines Films anhand des Credits-Arrays.
+         */
         private void replaceMovieCast(Connection c, Long movieId, JsonArray cast, Map<Integer, Long> personCache)
                         throws Exception {
                 clearMovieRelation(c, "movie_cast", movieId);
@@ -809,6 +911,9 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Ersetzt die gesamte Crew eines Films inklusive Job/Department-Verknüpfung.
+         */
         private void replaceMovieCrew(Connection c, Long movieId, JsonArray crew, Map<Integer, Long> personCache)
                         throws Exception {
                 clearMovieRelation(c, "movie_crew", movieId);
@@ -842,6 +947,10 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Sorgt dafür, dass eine Person aus den Credit-Daten in der Datenbank existiert
+         * und liefert ihre ID.
+         */
         private Long ensurePerson(Connection c, JsonObject creditData, Map<Integer, Long> personCache) throws Exception {
                 int tmdbId = creditData.getInt("id");
                 if (personCache.containsKey(tmdbId))
@@ -889,6 +998,9 @@ public class MovieImportService {
                 return personId;
         }
 
+        /**
+         * Löscht alle Zeilen einer movie-bezogenen Tabelle für eine konkrete Film-ID.
+         */
         private void clearMovieRelation(Connection c, String table, Long movieId) throws SQLException {
                 try (PreparedStatement ps = c.prepareStatement("DELETE FROM " + table + " WHERE movie_id = ?")) {
                         ps.setLong(1, movieId);
@@ -896,6 +1008,9 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Löscht alle abhängigen Relationen eines Films, bevor neue Daten geschrieben werden.
+         */
         private void clearMovieRelations(Connection c, Long movieId) throws SQLException {
                 clearMovieRelation(c, "movie_genre", movieId);
                 clearMovieRelation(c, "movie_spoken_language", movieId);
@@ -907,6 +1022,9 @@ public class MovieImportService {
                 clearMovieRelation(c, "movie_watch_provider", movieId);
         }
 
+        /**
+         * Konvertiert ein Datums-String in ein SQL-Datum, falls möglich.
+         */
         private static Date toSqlDate(String s) {
                 if (s == null || s.isBlank())
                         return null;
@@ -917,12 +1035,18 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Liest eine Dezimalzahl aus einem JSON-Objekt aus.
+         */
         private BigDecimal toBigDecimal(JsonObject json, String key) {
                 if (json == null || !json.containsKey(key) || json.isNull(key))
                         return null;
                 return new BigDecimal(json.getJsonNumber(key).toString());
         }
 
+        /**
+         * Legt den Movie-Datensatz an oder aktualisiert ihn mit allen Stammdaten.
+         */
         private Long upsertMovie(Connection c, jakarta.json.JsonObject j) throws SQLException {
                 try (PreparedStatement ps = c.prepareStatement(
                                 "INSERT INTO movie (tmdb_id, imdb_id, title, original_title, original_language, adult, video, status, "
@@ -969,6 +1093,9 @@ public class MovieImportService {
                 }
         }
 
+        /**
+         * Normalisiert ISO-Codes, indem Leerzeichen entfernt und leere Strings unterdrückt werden.
+         */
         private static String normalizeIso2(String s) {
                 if (s == null)
                         return null;
@@ -976,12 +1103,18 @@ public class MovieImportService {
                 return t.isEmpty() ? null : t;
         }
 
+        /**
+         * Wandelt leere Strings in {@code null} um.
+         */
         private static String blankToNull(String s) {
                 if (s == null)
                         return null;
                 return s.isBlank() ? null : s;
         }
 
+        /**
+         * Liefert die Primärschlüssel-ID zu einer TMDB-ID aus einer beliebigen Tabelle.
+         */
         private Long findIdByTmdb(Connection c, String table, int tmdbId) throws SQLException {
                 try (PreparedStatement ps = c.prepareStatement("SELECT id FROM " + table + " WHERE tmdb_id = ?")) {
                         ps.setInt(1, tmdbId);

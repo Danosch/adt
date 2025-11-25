@@ -10,6 +10,9 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Filmgenre-Stammdaten aus TMDB.
+ */
 @Entity
 @Table(name = "genre")
 @Getter

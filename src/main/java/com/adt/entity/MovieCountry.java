@@ -11,9 +11,12 @@ import jakarta.persistence.UniqueConstraint;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Zuordnung zwischen Filmen und Ländern (z. B. Produktionsland).
+ */
 @Entity
 @Table(name = "movie_country", uniqueConstraints = @UniqueConstraint(name = "uq_movie_country", columnNames = {
-		"movie_id", "iso_3166_1", "country_type_id" }))
+                "movie_id", "iso_3166_1", "country_type_id" }))
 @Getter
 @Setter
 public class MovieCountry {

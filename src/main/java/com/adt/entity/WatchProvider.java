@@ -11,9 +11,12 @@ import jakarta.persistence.UniqueConstraint;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Streaming- oder Kauf-Anbieter aus TMDB inklusive Region.
+ */
 @Entity
 @Table(name = "watch_provider", uniqueConstraints = @UniqueConstraint(name = "uq_watch_provider_tmdb", columnNames = {
-		"tmdb_id", "region" }))
+                "tmdb_id", "region" }))
 @Getter
 @Setter
 public class WatchProvider {
