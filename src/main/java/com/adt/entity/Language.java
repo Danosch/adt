@@ -10,6 +10,9 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Sprachstammdaten basierend auf ISO-639-1.
+ */
 @Entity
 @Table(name = "language")
 @Getter

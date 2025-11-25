@@ -11,9 +11,12 @@ import jakarta.persistence.UniqueConstraint;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Join-Tabelle zwischen Film und Produktionsfirma.
+ */
 @Entity
 @Table(name = "movie_production_company", uniqueConstraints = @UniqueConstraint(name = "uq_mpc_company", columnNames = {
-		"movie_id", "production_company_id" }))
+                "movie_id", "production_company_id" }))
 @Getter
 @Setter
 public class MovieProductionCompany {

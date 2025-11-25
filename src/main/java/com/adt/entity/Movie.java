@@ -13,6 +13,9 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * JPA-Entity für die movie-Tabelle mit allen Stammdaten eines Films aus TMDB.
+ */
 @Entity
 @Table(name = "movie")
 @Getter

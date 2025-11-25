@@ -11,9 +11,12 @@ import jakarta.persistence.UniqueConstraint;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Cast-Zuordnung inklusive gespieltem Charakter.
+ */
 @Entity
 @Table(name = "movie_cast", uniqueConstraints = @UniqueConstraint(name = "uq_movie_cast", columnNames = { "movie_id",
-		"person_id", "character_name" }))
+                "person_id", "character_name" }))
 @Getter
 @Setter
 public class MovieCast {

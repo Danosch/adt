@@ -11,9 +11,12 @@ import jakarta.persistence.UniqueConstraint;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Join-Tabelle zwischen Film und Genre.
+ */
 @Entity
 @Table(name = "movie_genre", uniqueConstraints = @UniqueConstraint(name = "uq_movie_genre", columnNames = { "movie_id",
-		"genre_id" }))
+                "genre_id" }))
 @Getter
 @Setter
 public class MovieGenre {

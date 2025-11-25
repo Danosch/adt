@@ -11,9 +11,12 @@ import jakarta.persistence.UniqueConstraint;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Verknüpft Filme mit Watch-Providern und deren Angebotstyp.
+ */
 @Entity
 @Table(name = "movie_watch_provider", uniqueConstraints = @UniqueConstraint(name = "uq_movie_provider", columnNames = {
-		"movie_id", "provider_id", "type" }))
+                "movie_id", "provider_id", "type" }))
 @Getter
 @Setter
 public class MovieWatchProvider {

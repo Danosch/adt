@@ -10,6 +10,9 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Abteilung für Crew-Jobs, z. B. Produktion oder Kamera.
+ */
 @Entity
 @Table(name = "department")
 @Getter

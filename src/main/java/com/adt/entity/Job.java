@@ -11,9 +11,12 @@ import jakarta.persistence.UniqueConstraint;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Konkreter Job innerhalb einer Department, z. B. Director oder Writer.
+ */
 @Entity
 @Table(name = "job", uniqueConstraints = @UniqueConstraint(name = "uq_job_dept", columnNames = { "department_id",
-		"name" }))
+                "name" }))
 @Getter
 @Setter
 public class Job {

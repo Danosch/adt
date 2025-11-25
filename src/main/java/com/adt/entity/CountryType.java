@@ -10,6 +10,9 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Typisierung von Länderbeziehungen (z. B. Produktionsland).
+ */
 @Entity
 @Table(name = "country_type")
 @Getter

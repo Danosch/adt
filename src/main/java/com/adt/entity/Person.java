@@ -13,6 +13,9 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Repräsentiert eine Person (Cast/Crew) inklusive biografischer Basisdaten.
+ */
 @Entity
 @Table(name = "person")
 @Getter

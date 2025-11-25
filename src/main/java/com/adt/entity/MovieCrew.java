@@ -11,9 +11,12 @@ import jakarta.persistence.UniqueConstraint;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Join-Tabelle zwischen Film, Person und Job für Crew-Mitglieder.
+ */
 @Entity
 @Table(name = "movie_crew", uniqueConstraints = @UniqueConstraint(name = "uq_movie_crew", columnNames = { "movie_id",
-		"person_id", "job_id" }))
+                "person_id", "job_id" }))
 @Getter
 @Setter
 public class MovieCrew {

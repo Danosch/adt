@@ -10,6 +10,9 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Produktionsfirma mit TMDB-ID und optionalem Herkunftsland.
+ */
 @Entity
 @Table(name = "production_company")
 @Getter

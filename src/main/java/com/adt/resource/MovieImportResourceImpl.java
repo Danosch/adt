@@ -9,12 +9,19 @@ import com.adt.entity.dto.ImportResultDTO;
 import com.adt.entity.dto.ImportYearResultDTO;
 import com.adt.service.MovieImportService;
 
+/**
+ * Implementierung der REST-Endpunkte, die den Import-Service aufrufen und
+ * eingehende Parameter validieren.
+ */
 public class MovieImportResourceImpl implements MovieImportResource {
 
-	@Inject
-	MovieImportService importService;
+        @Inject
+        MovieImportService importService;
 
-	@Override
+        @Override
+        /**
+         * Validiert den ID-Bereich und stößt anschließend den Import an.
+         */
         public ImportResultDTO importMovies(int startId, int endId) {
                 if (endId < startId) {
                         throw new BadRequestException("Parameter 'end' must be >= 'start'");
@@ -33,6 +40,10 @@ public class MovieImportResourceImpl implements MovieImportResource {
         }
 
         @Override
+        /**
+         * Validiert den Jahrgangsbereich, begrenzt ihn auf den erlaubten Zeitraum
+         * und stößt den Jahresimport an.
+         */
         public ImportYearResultDTO importMoviesFromYears(int startYear, int endYear) {
                 if (startYear <= 0 || endYear <= 0) {
                         throw new BadRequestException("Parameters 'startYear' and 'endYear' must be positive");

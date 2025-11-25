@@ -10,6 +10,9 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Länder-Stammdaten mit ISO-3166-1-Code.
+ */
 @Entity
 @Table(name = "country")
 @Getter
