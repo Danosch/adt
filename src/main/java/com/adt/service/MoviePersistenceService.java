@@ -321,8 +321,8 @@ public class MoviePersistenceService {
 	}
 
 	private void clearMovieRelations(Connection c, Long moviePk) throws SQLException {
-		clearMovieRelation(c, "movie_genre", moviePk);
-		clearMovieRelation(c, "movie_language", moviePk);
+                clearMovieRelation(c, "movie_genre", moviePk);
+                clearMovieRelation(c, "movie_spoken_language", moviePk);
 		clearMovieRelation(c, "movie_country", moviePk);
 		clearMovieRelation(c, "movie_production_company", moviePk);
 		clearMovieRelation(c, "movie_cast", moviePk);
@@ -355,9 +355,9 @@ public class MoviePersistenceService {
 	private void linkMovieSpokenLanguages(Connection c, Long movieId, JsonArray languages) throws SQLException {
 		if (languages == null || languages.isEmpty())
 			return;
-		try (PreparedStatement ps = c.prepareStatement(
-				"INSERT INTO movie_language (movie_id, language_id) VALUES (?, ?) "
-						+ "ON CONFLICT (movie_id, language_id) DO NOTHING")) {
+                try (PreparedStatement ps = c.prepareStatement(
+                                "INSERT INTO movie_spoken_language (movie_id, iso_639_1) VALUES (?, ?) "
+                                                + "ON CONFLICT (movie_id, iso_639_1) DO NOTHING")) {
 			for (JsonValue v : languages) {
 				JsonObject l = v.asJsonObject();
 				ps.setLong(1, movieId);
