@@ -26,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.json.Json;
@@ -35,6 +36,8 @@ import jakarta.json.JsonString;
 import jakarta.json.JsonValue;
 
 import javax.sql.DataSource;
+
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import com.adt.entity.dto.ImportStatsDTO;
 
@@ -59,9 +62,15 @@ public class MovieImportService {
                         .callTimeout(MAX_RETRY_WAIT)
                         .build();
 
-        private static final int MAX_CONCURRENT_IMPORTS = Integer
-                        .getInteger("adt.import.max-concurrency", 10);
-        private final Semaphore importSemaphore = new Semaphore(MAX_CONCURRENT_IMPORTS);
+        @ConfigProperty(name = "adt.import.max-concurrency", defaultValue = "10")
+        private int maxConcurrentImports;
+        private Semaphore importSemaphore;
+
+        @PostConstruct
+        void initSemaphore() {
+                int permits = Math.max(1, maxConcurrentImports);
+                importSemaphore = new Semaphore(permits);
+        }
 
         private static final long DEFAULT_CALL_INTERVAL_NANOS = 1_000_000_000L / 50; // 50 calls per second
         private final java.util.concurrent.atomic.AtomicLong callIntervalNanos = new java.util.concurrent.atomic.AtomicLong(
