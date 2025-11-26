@@ -272,17 +272,16 @@ public class MoviePersistenceService {
 	}
 
 	private Long upsertMovie(Connection c, JsonObject json) throws SQLException {
-		String insert = "INSERT INTO movie (tmdb_id, imdb_id, adult, budget, homepage, original_language, "
-				+ "original_title, overview, popularity, release_date, revenue, runtime, status, tagline, title, "
-				+ "video, vote_average, vote_count, backdrop_path, poster_path, title_shortened) "
-				+ "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-				+ "ON CONFLICT (tmdb_id) DO UPDATE SET "
-				+ "imdb_id = COALESCE(EXCLUDED.imdb_id, movie.imdb_id), "
-				+ "adult = EXCLUDED.adult, budget = EXCLUDED.budget, homepage = EXCLUDED.homepage, original_language = EXCLUDED.original_language, "
-				+ "original_title = EXCLUDED.original_title, overview = EXCLUDED.overview, popularity = EXCLUDED.popularity, release_date = EXCLUDED.release_date, "
-				+ "revenue = EXCLUDED.revenue, runtime = EXCLUDED.runtime, status = EXCLUDED.status, tagline = EXCLUDED.tagline, title = EXCLUDED.title, "
-				+ "video = EXCLUDED.video, vote_average = EXCLUDED.vote_average, vote_count = EXCLUDED.vote_count, backdrop_path = EXCLUDED.backdrop_path, "
-				+ "poster_path = EXCLUDED.poster_path, title_shortened = EXCLUDED.title_shortened";
+                String insert = "INSERT INTO movie (tmdb_id, imdb_id, adult, budget, homepage, original_language, "
+                                + "original_title, overview, popularity, release_date, revenue, runtime, status, tagline, title, "
+                                + "video, vote_average, vote_count) "
+                                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                                + "ON CONFLICT (tmdb_id) DO UPDATE SET "
+                                + "imdb_id = COALESCE(EXCLUDED.imdb_id, movie.imdb_id), "
+                                + "adult = EXCLUDED.adult, budget = EXCLUDED.budget, homepage = EXCLUDED.homepage, original_language = EXCLUDED.original_language, "
+                                + "original_title = EXCLUDED.original_title, overview = EXCLUDED.overview, popularity = EXCLUDED.popularity, release_date = EXCLUDED.release_date, "
+                                + "revenue = EXCLUDED.revenue, runtime = EXCLUDED.runtime, status = EXCLUDED.status, tagline = EXCLUDED.tagline, title = EXCLUDED.title, "
+                                + "video = EXCLUDED.video, vote_average = EXCLUDED.vote_average, vote_count = EXCLUDED.vote_count";
 
 		try (PreparedStatement ps = c.prepareStatement(insert)) {
 			ps.setLong(1, json.getInt("id"));
@@ -301,16 +300,13 @@ public class MoviePersistenceService {
 			else
 				ps.setInt(12, json.getInt("runtime"));
 			ps.setString(13, json.getString("status", null));
-			ps.setString(14, json.getString("tagline", null));
-			ps.setString(15, json.getString("title", null));
-			ps.setBoolean(16, json.getBoolean("video", false));
-			ps.setBigDecimal(17, new BigDecimal(json.getJsonNumber("vote_average").doubleValue()));
-			ps.setInt(18, json.getInt("vote_count"));
-			ps.setString(19, blankToNull(json.getString("backdrop_path", null)));
-			ps.setString(20, blankToNull(json.getString("poster_path", null)));
-			ps.setString(21, blankToNull(json.getString("title_shortened", null)));
-			ps.executeUpdate();
-		}
+                        ps.setString(14, json.getString("tagline", null));
+                        ps.setString(15, json.getString("title", null));
+                        ps.setBoolean(16, json.getBoolean("video", false));
+                        ps.setBigDecimal(17, new BigDecimal(json.getJsonNumber("vote_average").doubleValue()));
+                        ps.setInt(18, json.getInt("vote_count"));
+                        ps.executeUpdate();
+                }
 
 		long moviePk;
 		try (PreparedStatement ps = c.prepareStatement("SELECT id FROM movie WHERE tmdb_id = ?")) {
