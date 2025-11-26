@@ -178,6 +178,7 @@ public class MovieImportService {
                         for (int year = startYear; year <= endYear; year++) {
                                 int page = 1;
                                 int totalPages = 1;
+                                boolean warnedAboutPageLimit = false;
                                 do {
                                         try {
                                                 HttpUrl url = HttpUrl.parse("https://api.themoviedb.org/3/discover/movie")
@@ -197,7 +198,15 @@ public class MovieImportService {
                                                         break;
                                                 }
 
-                                                totalPages = response.getInt("total_pages", 1);
+                                                int reportedTotalPages = response.getInt("total_pages", 1);
+                                                if (!warnedAboutPageLimit && reportedTotalPages > 500) {
+                                                        warnedAboutPageLimit = true;
+                                                        System.out.println("ℹ️  TMDB meldet " + reportedTotalPages
+                                                                        + " Seiten für " + year
+                                                                        + "; Import wird auf die ersten 500 Seiten begrenzt.");
+                                                }
+
+                                                totalPages = Math.min(reportedTotalPages, 500);
                                                 JsonArray results = response.getJsonArray("results");
                                                 if (results != null) {
                                                         for (JsonValue value : results) {
@@ -574,14 +583,10 @@ public class MovieImportService {
         private Long upsertCountryType(Connection c, String code, String desc) throws SQLException {
                 try (PreparedStatement ps = c.prepareStatement(
                                 "INSERT INTO country_type (code, description) VALUES (?, ?) "
-                                                + "ON CONFLICT (code) DO UPDATE SET description = EXCLUDED.description",
-                                Statement.RETURN_GENERATED_KEYS)) {
+                                                + "ON CONFLICT (code) DO UPDATE SET description = EXCLUDED.description "
+                                                + "RETURNING id")) {
                         ps.setString(1, code);
                         ps.setString(2, desc);
-                        ps.executeUpdate();
-                }
-                try (PreparedStatement ps = c.prepareStatement("SELECT id FROM country_type WHERE code = ?")) {
-                        ps.setString(1, code);
                         try (ResultSet rs = ps.executeQuery()) {
                                 rs.next();
                                 return rs.getLong(1);
