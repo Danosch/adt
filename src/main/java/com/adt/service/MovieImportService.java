@@ -1,5 +1,6 @@
 package com.adt.service;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.Date;
@@ -8,11 +9,21 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
+import java.time.Duration;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.IntStream;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -41,7 +52,11 @@ public class MovieImportService {
         @Inject
         DataSource ds;
 
-        private final OkHttpClient http = new OkHttpClient();
+        private static final Duration MAX_RETRY_WAIT = Duration.ofSeconds(10);
+
+        private final OkHttpClient http = new OkHttpClient.Builder()
+                        .callTimeout(MAX_RETRY_WAIT)
+                        .build();
 
         private static final long DEFAULT_CALL_INTERVAL_NANOS = 1_000_000_000L / 50; // 50 calls per second
         private final java.util.concurrent.atomic.AtomicLong callIntervalNanos = new java.util.concurrent.atomic.AtomicLong(
@@ -100,24 +115,19 @@ public class MovieImportService {
                 refreshApiRateLimit();
                 refreshMovieGenres();
 
-                int imported = 0;
-                int failed = 0;
+                AtomicInteger imported = new AtomicInteger();
+                AtomicInteger failed = new AtomicInteger();
                 long start = System.currentTimeMillis();
 
-                for (int id = startId; id <= endId; id++) {
-                        try {
-                                if (importOne(id))
-                                        imported++;
-                                else
-                                        failed++;
-                        } catch (Exception e) {
-                                failed++;
-                                System.err.println("❌ Import failed for TMDB id " + id + ": " + e.getMessage());
-                        }
+                try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                        List<Future<?>> tasks = IntStream.rangeClosed(startId, endId)
+                                        .mapToObj(id -> submitImportTask(id, executor, imported, failed))
+                                        .toList();
+                        waitForTasks(tasks);
                 }
 
                 long duration = System.currentTimeMillis() - start;
-                return new ImportStatsDTO(imported, failed, duration);
+                return new ImportStatsDTO(imported.get(), failed.get(), duration);
         }
 
         /**
@@ -144,59 +154,95 @@ public class MovieImportService {
                 refreshApiRateLimit();
                 refreshMovieGenres();
 
-                int imported = 0;
-                int failed = 0;
+                AtomicInteger imported = new AtomicInteger();
+                AtomicInteger failed = new AtomicInteger();
                 long start = System.currentTimeMillis();
 
-                for (int year = startYear; year <= endYear; year++) {
-                        int page = 1;
-                        int totalPages = 1;
-                        do {
-                                try {
-                                        HttpUrl url = HttpUrl.parse("https://api.themoviedb.org/3/discover/movie").newBuilder()
-                                                        .addQueryParameter("language", "en-US")
-                                                        .addQueryParameter("sort_by", "primary_release_date.asc")
-                                                        .addQueryParameter("include_adult", "false")
-                                                        .addQueryParameter("include_video", "false")
-                                                        .addQueryParameter("with_release_type", "1|2|3|4|5|6|7")
-                                                        .addQueryParameter("primary_release_date.gte", year + "-01-01")
-                                                        .addQueryParameter("primary_release_date.lte", year + "-12-31")
-                                                        .addQueryParameter("page", String.valueOf(page))
-                                                        .build();
+                try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                        List<Future<?>> tasks = new ArrayList<>();
 
-                                        JsonObject response = getJson(url.toString());
-                                        if (response == null) {
-                                                break;
-                                        }
+                        for (int year = startYear; year <= endYear; year++) {
+                                int page = 1;
+                                int totalPages = 1;
+                                do {
+                                        try {
+                                                HttpUrl url = HttpUrl.parse("https://api.themoviedb.org/3/discover/movie")
+                                                                .newBuilder()
+                                                                .addQueryParameter("language", "en-US")
+                                                                .addQueryParameter("sort_by", "primary_release_date.asc")
+                                                                .addQueryParameter("include_adult", "false")
+                                                                .addQueryParameter("include_video", "false")
+                                                                .addQueryParameter("with_release_type", "1|2|3|4|5|6|7")
+                                                                .addQueryParameter("primary_release_date.gte", year + "-01-01")
+                                                                .addQueryParameter("primary_release_date.lte", year + "-12-31")
+                                                                .addQueryParameter("page", String.valueOf(page))
+                                                                .build();
 
-                                        totalPages = response.getInt("total_pages", 1);
-                                        JsonArray results = response.getJsonArray("results");
-                                        if (results != null) {
-                                                for (JsonValue value : results) {
-                                                        JsonObject movie = value.asJsonObject();
-                                                        int tmdbId = movie.getInt("id");
-                                                        try {
-                                                                if (importOne(tmdbId))
-                                                                        imported++;
-                                                                else
-                                                                        failed++;
-                                                        } catch (Exception e) {
-                                                                failed++;
-                                                                System.err.println("❌ Import failed for TMDB id " + tmdbId + ": " + e.getMessage());
+                                                JsonObject response = getJson(url.toString());
+                                                if (response == null) {
+                                                        break;
+                                                }
+
+                                                totalPages = response.getInt("total_pages", 1);
+                                                JsonArray results = response.getJsonArray("results");
+                                                if (results != null) {
+                                                        for (JsonValue value : results) {
+                                                                JsonObject movie = value.asJsonObject();
+                                                                int tmdbId = movie.getInt("id");
+                                                                tasks.add(submitImportTask(tmdbId, executor, imported, failed));
                                                         }
                                                 }
+                                        } catch (Exception e) {
+                                                failed.incrementAndGet();
+                                                System.err.println(
+                                                                "❌ Discover request failed for year " + year + ", page " + page + ": "
+                                                                                + e.getMessage());
                                         }
-                                } catch (Exception e) {
-                                        failed++;
-                                        System.err.println("❌ Discover request failed for year " + year + ", page " + page + ": "
-                                                        + e.getMessage());
-                                }
-                                page++;
-                        } while (page <= totalPages);
+                                        page++;
+                                } while (page <= totalPages);
+                        }
+
+                        waitForTasks(tasks);
                 }
 
                 long duration = System.currentTimeMillis() - start;
-                return new ImportStatsDTO(imported, failed, duration);
+                return new ImportStatsDTO(imported.get(), failed.get(), duration);
+        }
+
+        /**
+         * Startet einen Import-Task für eine TMDB-ID auf einem Virtual Thread und
+         * aktualisiert die Erfolgs- bzw. Fehlerzähler.
+         */
+        private Future<?> submitImportTask(int tmdbId, ExecutorService executor, AtomicInteger imported,
+                        AtomicInteger failed) {
+                return executor.submit(() -> {
+                        try {
+                                if (importOne(tmdbId))
+                                        imported.incrementAndGet();
+                                else
+                                        failed.incrementAndGet();
+                        } catch (Exception e) {
+                                failed.incrementAndGet();
+                                System.err.println("❌ Import failed for TMDB id " + tmdbId + ": " + e.getMessage());
+                        }
+                });
+        }
+
+        /**
+         * Wartet auf die Fertigstellung aller gestarteten Import-Tasks und leitet
+         * Interrupts kontrolliert weiter.
+         */
+        private void waitForTasks(Collection<Future<?>> tasks) {
+                for (Future<?> task : tasks) {
+                        try {
+                                task.get();
+                        } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                throw new RuntimeException("Interrupted while waiting for imports to finish", e);
+                        } catch (Exception e) {
+                                throw new RuntimeException("Import task failed", e);
+                        }
+                }
         }
 
         // ============================================================
@@ -214,17 +260,51 @@ public class MovieImportService {
                                 .addHeader("Authorization", "Bearer " + token())
                                 .build();
 
-                awaitRateLimit();
+                long deadline = System.nanoTime() + MAX_RETRY_WAIT.toNanos();
+                int attempt = 0;
 
-                try (Response resp = http.newCall(req).execute()) {
-                        updateRateLimitFromResponse(resp);
-                        if (resp.code() == 404)
-                                return null;
-                        if (!resp.isSuccessful())
-                                throw new RuntimeException("HTTP " + resp.code() + " for URL " + url);
+                while (true) {
+                        awaitRateLimit();
 
-                        String body = resp.body().string();
-                        return Json.createReader(new java.io.StringReader(body)).readObject();
+                        try (Response resp = http.newCall(req).execute()) {
+                                updateRateLimitFromResponse(resp);
+                                if (resp.code() == 404)
+                                        return null;
+
+                                if (isTransientStatus(resp.code()) && System.nanoTime() < deadline) {
+                                        sleepForRetry(attempt++, deadline);
+                                        continue;
+                                }
+
+                                if (!resp.isSuccessful())
+                                        throw new RuntimeException("HTTP " + resp.code() + " for URL " + url);
+
+                                String body = resp.body().string();
+                                return Json.createReader(new java.io.StringReader(body)).readObject();
+                        } catch (IOException e) {
+                                if (System.nanoTime() >= deadline) {
+                                        throw new RuntimeException("TMDB request failed after waiting for a response", e);
+                                }
+                                sleepForRetry(attempt++, deadline);
+                        }
+                }
+        }
+
+        private boolean isTransientStatus(int statusCode) {
+                return statusCode == 429 || statusCode == 500 || statusCode == 502 || statusCode == 503 || statusCode == 504;
+        }
+
+        private void sleepForRetry(int attempt, long deadlineNanos) {
+                long remainingMillis = Math.max(0, TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime()));
+                if (remainingMillis == 0)
+                        return;
+
+                long delayMillis = Math.min(remainingMillis, 500L + Math.min(attempt, 5) * 200L);
+                try {
+                        Thread.sleep(delayMillis);
+                } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException("Interrupted while waiting for TMDB response", e);
                 }
         }
 
