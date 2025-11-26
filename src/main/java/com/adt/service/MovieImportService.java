@@ -21,6 +21,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
@@ -57,6 +58,10 @@ public class MovieImportService {
         private final OkHttpClient http = new OkHttpClient.Builder()
                         .callTimeout(MAX_RETRY_WAIT)
                         .build();
+
+        private static final int MAX_CONCURRENT_IMPORTS = Integer
+                        .getInteger("adt.import.max-concurrency", 10);
+        private final Semaphore importSemaphore = new Semaphore(MAX_CONCURRENT_IMPORTS);
 
         private static final long DEFAULT_CALL_INTERVAL_NANOS = 1_000_000_000L / 50; // 50 calls per second
         private final java.util.concurrent.atomic.AtomicLong callIntervalNanos = new java.util.concurrent.atomic.AtomicLong(
@@ -216,14 +221,24 @@ public class MovieImportService {
         private Future<?> submitImportTask(int tmdbId, ExecutorService executor, AtomicInteger imported,
                         AtomicInteger failed) {
                 return executor.submit(() -> {
+                        boolean permitAcquired = false;
                         try {
+                                importSemaphore.acquire();
+                                permitAcquired = true;
                                 if (importOne(tmdbId))
                                         imported.incrementAndGet();
                                 else
                                         failed.incrementAndGet();
+                        } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                failed.incrementAndGet();
+                                System.err.println("❌ Import failed for TMDB id " + tmdbId + ": " + e.getMessage());
                         } catch (Exception e) {
                                 failed.incrementAndGet();
                                 System.err.println("❌ Import failed for TMDB id " + tmdbId + ": " + e.getMessage());
+                        } finally {
+                                if (permitAcquired)
+                                        importSemaphore.release();
                         }
                 });
         }
