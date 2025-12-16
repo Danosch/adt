@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.transaction.Transactional;
 
 import com.adt.entity.dto.ExplainPlanDTO;
 import com.adt.entity.dto.MaintenanceActionDTO;
@@ -20,6 +21,7 @@ public class DatabaseMaintenanceService extends BaseRepository {
 	/**
 	 * Führt ein ANALYZE über die aktuelle Datenbank aus, um Statistiken für den Optimizer zu aktualisieren.
 	 */
+	@Transactional
 	public MaintenanceActionDTO analyzeStatistics() {
 		long start = System.nanoTime();
 		em.createNativeQuery("ANALYZE").executeUpdate();
