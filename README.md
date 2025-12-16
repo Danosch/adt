@@ -23,6 +23,9 @@ Diese Quarkus-Anwendung importiert Filmdaten aus der TMDB-API (The Movie Databas
 | `GET` | `/db/metrics/language-filter?language={iso}&limit={n}` | Indexfreundliche Filterung nach `original_language`. |
 | `GET` | `/db/metrics/recent-popular?startYear={jahr}&limit={n}` | Kombinierte Filterung auf `release_date` und Popularität (performant). |
 | `GET` | `/db/metrics/load-test?iterations={anzahl}&limit={n}` | Führt mehrere Queries sequenziell aus, um spürbare DB-Last zu erzeugen. |
+| `GET` | `/db/maintenance/analyze` | Stößt ein `ANALYZE` an, damit der Planner aktuelle Statistiken nutzt. |
+| `GET` | `/db/maintenance/explain/release-range?startYear={jahr}&endYear={jahr}&limit={n}` | Zeigt den Explain-Plan der indexfreundlichen Range-Abfrage. |
+| `GET` | `/db/maintenance/explain/year-extraction?year={jahr}&limit={n}` | Zeigt den Explain-Plan der unperformanten Jahres-Extraktion. |
 
 Die Endpunkte liefern jeweils ein DTO mit Importstatistiken (erfolgreiche/fehlgeschlagene Importe und Dauer in Millisekunden).
 
@@ -53,8 +56,10 @@ Die Datenbanktabellen werden über Flyway-Migrationen bereitgestellt (`/flyway`-
 - Weitere sinnvolle Maßnahmen:
   - Query-Parameter mit sinnvollen Limits versehen, um Resultsets klein zu halten.
   - Vermeiden von Funktionen auf indizierten Spalten (z. B. `lower(column)`, `year(column)`), wenn stattdessen Range-Abfragen möglich sind.
-  - Regelmäßig `EXPLAIN (ANALYZE, BUFFERS)` nutzen, um Indexnutzung und I/O zu prüfen.
-  - Statistiken aktuell halten (`ANALYZE`) und Autovacuum-Parameter auf die Datenlast abstimmen.
+  - Explain-Pläne vergleichen: `/db/maintenance/explain/release-range` (nutzt Index) vs. `/db/maintenance/explain/year-extraction` (Funktionsaufruf, umgeht Index).
+  - Statistiken aktuell halten: `/db/maintenance/analyze` triggert ein `ANALYZE`, alternativ regelmäßig via Cron oder nach großen Imports ausführen.
+  - `EXPLAIN (ANALYZE, BUFFERS)` aus den Explain-Endpunkten nutzen, um die Indexnutzung sichtbar zu machen und I/O-Kosten zu erkennen.
+  - Autovacuum-/Planner-Parameter anpassen, wenn dauerhaft hohe Last oder viele Änderungen auftreten.
 
 ## DB-Last mit den Metrik-Endpunkten erzeugen
 1. Anwendung starten (z. B. `./mvnw quarkus:dev`) und sicherstellen, dass Prometheus/ Micrometer aktiviert ist.
@@ -62,16 +67,25 @@ Die Datenbanktabellen werden über Flyway-Migrationen bereitgestellt (`/flyway`-
    ```bash
    curl "http://localhost:8080/db/metrics/release-range?startYear=2010&endYear=2020&limit=200"
    ```
-3. Anschließend unperformante Pfade aufrufen, um Last aufzubauen (führen häufige `order by random()` oder führende Wildcards aus):
+3. Optional Planner-Statistiken aktualisieren, damit Explain-Pläne die aktuellen Daten widerspiegeln:
+   ```bash
+   curl "http://localhost:8080/db/maintenance/analyze"
+   ```
+4. Explain-Pläne für performante vs. unperformante Queries abrufen und vergleichen (zeigt Index-Nutzung und Buffers an):
+   ```bash
+   curl "http://localhost:8080/db/maintenance/explain/release-range?startYear=2015&endYear=2020&limit=150"
+   curl "http://localhost:8080/db/maintenance/explain/year-extraction?year=2018&limit=150"
+   ```
+5. Anschließend unperformante Pfade aufrufen, um Last aufzubauen (führen häufige `order by random()` oder führende Wildcards aus):
    ```bash
    curl "http://localhost:8080/db/metrics/random-sort?limit=500"
    curl "http://localhost:8080/db/metrics/wildcard-original-title?term=man&limit=500"
    ```
-4. Mit `/db/metrics/load-test` gezielt mehrere langsame und schnelle Abfragen hintereinander triggern. Die Parameter `iterations` und `limit` steuern dabei Lastdauer und Resultset-Größe:
+6. Mit `/db/metrics/load-test` gezielt mehrere langsame und schnelle Abfragen hintereinander triggern. Die Parameter `iterations` und `limit` steuern dabei Lastdauer und Resultset-Größe:
    ```bash
    curl "http://localhost:8080/db/metrics/load-test?iterations=5&limit=250"
    ```
-5. Prometheus-Scrapes oder `quarkus:dev`-Logausgaben liefern die Messwerte (Micrometer-Timer). Unter Last sollten sich die Unterschiede zwischen Index-gestützten und Voll-Scan-Abfragen deutlich zeigen.
+7. Prometheus-Scrapes oder `quarkus:dev`-Logausgaben liefern die Messwerte (Micrometer-Timer). Unter Last sollten sich die Unterschiede zwischen Index-gestützten und Voll-Scan-Abfragen deutlich zeigen. Die Explain-Endpunkte erleichtern zusätzlich die Interpretation (Index-Scan vs. Seq Scan, Buffers, Sort-Knoten).
 
 ## Strukturhinweise
 - Die Anwendung nutzt OkHttp für HTTP-Aufrufe und Jakarta EE (JAX-RS, JPA, CDI) im Rahmen von Quarkus.
