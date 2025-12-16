@@ -1,6 +1,7 @@
 package com.adt.service;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.util.function.Supplier;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -54,6 +55,190 @@ public class DatabaseMetricsService extends BaseRepository {
                                                 .setMaxResults(200)
                                                 .getResultList()
                                                 .size());
+        }
+
+        /**
+         * Führt eine Abfrage mit Jahres-Extraktion aus, die typischerweise keinen Index nutzt.
+         */
+        @Timed(value = "adt.db.query.year-extraction", description = "Jahresfilter per Funktion, die Indexe umgehen kann")
+        public QueryPerformanceDTO measureYearExtractionSearch(int year) {
+                return runTimedQuery(
+                                "year-extraction",
+                                "adt.db.query.year-extraction",
+                                "Jahresfilter via year()-Funktion auf release_date (nicht indexfreundlich)",
+                                () -> em.createQuery(
+                                                "select m from Movie m where year(m.releaseDate) = :year order by m.releaseDate",
+                                                Movie.class)
+                                                .setParameter("year", year)
+                                                .setMaxResults(1000)
+                                                .getResultList()
+                                                .size());
+        }
+
+        /**
+         * Führt eine indexfreundliche Range-Abfrage auf Basis von release_date aus.
+         */
+        @Timed(value = "adt.db.query.release-range", description = "Range-Query über release_date, profitiert von Index")
+        public QueryPerformanceDTO measureReleaseRange(int startYear, int endYear, int limit) {
+                int effectiveStartYear = Math.min(startYear, endYear);
+                int effectiveEndYear = Math.max(startYear, endYear);
+                LocalDate startDate = LocalDate.of(effectiveStartYear, 1, 1);
+                LocalDate endDate = LocalDate.of(effectiveEndYear, 12, 31);
+
+                return runTimedQuery(
+                                "release-range",
+                                "adt.db.query.release-range",
+                                "Jahresbereich mit BETWEEN auf release_date und Limit",
+                                () -> em.createQuery(
+                                                "select m from Movie m where m.releaseDate between :start and :end order by m.releaseDate",
+                                                Movie.class)
+                                                .setParameter("start", startDate)
+                                                .setParameter("end", endDate)
+                                                .setMaxResults(Math.max(1, limit))
+                                                .getResultList()
+                                                .size());
+        }
+
+        /**
+         * Führt eine textbasierte Suche über die Overview-Spalte aus (bewusst ohne Index).
+         */
+        @Timed(value = "adt.db.query.overview-scan", description = "Textscan über Overview ohne Volltextindex")
+        public QueryPerformanceDTO measureOverviewScan(String term) {
+                String searchTerm = term == null ? "" : term.toLowerCase();
+                return runTimedQuery(
+                                "overview-scan",
+                                "adt.db.query.overview-scan",
+                                "Volltextähnliche Suche in overview via LIKE", () -> em.createQuery(
+                                                "select m from Movie m where lower(m.overview) like concat('%', :term, '%') order by m.id",
+                                                Movie.class)
+                                                .setParameter("term", searchTerm)
+                                                .setMaxResults(300)
+                                                .getResultList()
+                                                .size());
+        }
+
+        /**
+         * Nutzt einen kombinierten Index für eine performante Top-Rated-Abfrage.
+         */
+        @Timed(value = "adt.db.query.top-rated", description = "Bestbewertete Filme nach VoteAverage/VoteCount mit Limit")
+        public QueryPerformanceDTO measureTopRated(int minVotes, int limit) {
+                int effectiveLimit = Math.max(1, limit);
+                return runTimedQuery(
+                                "top-rated",
+                                "adt.db.query.top-rated",
+                                "Sortierung nach vote_average/vote_count mit kombinierten Index",
+                                () -> em.createQuery(
+                                                "select m from Movie m where m.voteCount >= :minVotes order by m.voteAverage desc, m.voteCount desc",
+                                                Movie.class)
+                                                .setParameter("minVotes", Math.max(0, minVotes))
+                                                .setMaxResults(effectiveLimit)
+                                                .getResultList()
+                                                .size());
+        }
+
+        /**
+         * Nutzt eine Zufallssortierung, die einen vollständigen Scan erzwingt.
+         */
+        @Timed(value = "adt.db.query.random-sort", description = "Zufällige Sortierung ohne Indexnutzung")
+        public QueryPerformanceDTO measureRandomSort(int limit) {
+                int effectiveLimit = Math.max(1, limit);
+                return runTimedQuery(
+                                "random-sort",
+                                "adt.db.query.random-sort",
+                                "ORDER BY random() erzwingt einen teuren Sort-Node",
+                                () -> em.createQuery("select m from Movie m order by function('random')", Movie.class)
+                                                .setMaxResults(effectiveLimit)
+                                                .getResultList()
+                                                .size());
+        }
+
+        /**
+         * Führt eine führende Wildcard-Suche auf dem Originaltitel aus, die keinen Index nutzt.
+         */
+        @Timed(value = "adt.db.query.wildcard-original-title", description = "Führende Wildcard auf original_title")
+        public QueryPerformanceDTO measureWildcardOriginalTitle(String term, int limit) {
+                int effectiveLimit = Math.max(1, limit);
+                String searchTerm = term == null ? "" : term.toLowerCase();
+                return runTimedQuery(
+                                "wildcard-original-title",
+                                "adt.db.query.wildcard-original-title",
+                                "Leading-Wildcard auf original_title um Index zu umgehen",
+                                () -> em.createQuery(
+                                                "select m from Movie m where lower(m.originalTitle) like concat('%', :term, '%')"
+                                                                + " order by m.originalTitle", Movie.class)
+                                                .setParameter("term", searchTerm)
+                                                .setMaxResults(effectiveLimit)
+                                                .getResultList()
+                                                .size());
+        }
+
+        /**
+         * Nutzt einen Index auf original_language für eine effiziente Filterung.
+         */
+        @Timed(value = "adt.db.query.language-filter", description = "Filterung nach original_language mit Index")
+        public QueryPerformanceDTO measureLanguageFilter(String language, int limit) {
+                int effectiveLimit = Math.max(1, limit);
+                String lang = language == null ? "" : language.toLowerCase();
+                return runTimedQuery(
+                                "language-filter",
+                                "adt.db.query.language-filter",
+                                "Filterung auf original_language mit Limit und Sortierung",
+                                () -> em.createQuery(
+                                                "select m from Movie m where lower(m.originalLanguage) = :lang order by m.releaseDate desc",
+                                                Movie.class)
+                                                .setParameter("lang", lang)
+                                                .setMaxResults(effectiveLimit)
+                                                .getResultList()
+                                                .size());
+        }
+
+        /**
+         * Kombiniert einen Jahresfilter mit Popularität, profitiert von neuen Indexen.
+         */
+        @Timed(value = "adt.db.query.recent-popular", description = "Neuere Filme nach Popularität sortiert")
+        public QueryPerformanceDTO measureRecentPopular(int startYear, int limit) {
+                int effectiveStartYear = Math.max(1900, startYear);
+                int effectiveLimit = Math.max(1, limit);
+                LocalDate startDate = LocalDate.of(effectiveStartYear, 1, 1);
+
+                return runTimedQuery(
+                                "recent-popular",
+                                "adt.db.query.recent-popular",
+                                "Neuere Filme mit Popularitätssortierung und Limit",
+                                () -> em.createQuery(
+                                                "select m from Movie m where m.releaseDate >= :start order by m.releaseDate desc, m.popularity desc",
+                                                Movie.class)
+                                                .setParameter("start", startDate)
+                                                .setMaxResults(effectiveLimit)
+                                                .getResultList()
+                                                .size());
+        }
+
+        /**
+         * Führt mehrere Abfragen sequenziell aus, um Last auf die Datenbank zu legen.
+         */
+        @Timed(value = "adt.db.query.load-test", description = "Sequenzielle Last für Performance-Vergleiche")
+        public QueryPerformanceDTO runLoadScenario(int iterations, int limit) {
+                int effectiveIterations = Math.max(1, iterations);
+                int effectiveLimit = Math.max(1, limit);
+                Timer.Sample sample = Timer.start(meterRegistry);
+                int totalRows = 0;
+
+                for (int i = 0; i < effectiveIterations; i++) {
+                        totalRows += measureUnindexedSearch("the").rowsReturned();
+                        totalRows += measureRandomSort(effectiveLimit).rowsReturned();
+                        totalRows += measureWildcardOriginalTitle("man", effectiveLimit).rowsReturned();
+                        totalRows += measureLanguageFilter("en", effectiveLimit).rowsReturned();
+                        totalRows += measureRecentPopular(2015, effectiveLimit).rowsReturned();
+                }
+
+                long durationNanos = sample.stop(Timer.builder("adt.db.query.load-test")
+                                .description("Mehrfachaufruf diverser Queries zur Erzeugung von Last")
+                                .register(meterRegistry));
+                long durationMillis = Duration.ofNanos(durationNanos).toMillis();
+                String description = "Sequenzieller Lasttest mit " + effectiveIterations + " Durchläufen à " + effectiveLimit
+                                + " Ergebnissen pro Query";
+                return new QueryPerformanceDTO("load-test", durationMillis, totalRows, description);
         }
 
         private QueryPerformanceDTO runTimedQuery(
