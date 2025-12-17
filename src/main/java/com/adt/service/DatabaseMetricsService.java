@@ -1,16 +1,27 @@
 package com.adt.service;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.sql.DataSource;
 
 import io.micrometer.core.annotation.Timed;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import com.adt.entity.Movie;
+import com.adt.entity.dto.ConcurrentLoadResultDTO;
 import com.adt.entity.dto.QueryPerformanceDTO;
 import com.adt.repository.BaseRepository;
 
@@ -22,6 +33,9 @@ public class DatabaseMetricsService extends BaseRepository {
 
         @Inject
         MeterRegistry meterRegistry;
+
+        @Inject
+        DataSource dataSource;
 
         /**
          * Führt eine index-basierte Suche über den Primärschlüssel aus.
@@ -239,6 +253,66 @@ public class DatabaseMetricsService extends BaseRepository {
                 String description = "Sequenzieller Lasttest mit " + effectiveIterations + " Durchläufen à " + effectiveLimit
                                 + " Ergebnissen pro Query";
                 return new QueryPerformanceDTO("load-test", durationMillis, totalRows, description);
+        }
+
+        /**
+         * Simuliert parallele Datenbankzugriffe mit frei wählbarer Nutzerzahl.
+         */
+        @Timed(value = "adt.db.query.concurrent-load", description = "Parallelisierung vieler kleiner DB-Reads")
+        public ConcurrentLoadResultDTO runConcurrentLoad(int virtualUsers, int limitPerUser) {
+                int effectiveUsers = Math.max(1, virtualUsers);
+                int effectiveLimit = Math.max(1, limitPerUser);
+
+                ExecutorService executor = Executors.newFixedThreadPool(Math.min(effectiveUsers, 2000));
+                CountDownLatch latch = new CountDownLatch(effectiveUsers);
+                AtomicInteger successfulQueries = new AtomicInteger();
+                AtomicInteger failedQueries = new AtomicInteger();
+                AtomicLong rowsRead = new AtomicLong();
+
+                Timer.Sample sample = Timer.start(meterRegistry);
+
+                for (int i = 0; i < effectiveUsers; i++) {
+                        executor.submit(() -> {
+                                try (Connection connection = dataSource.getConnection();
+                                                PreparedStatement stmt = connection.prepareStatement(
+                                                                "select id from movie order by id desc limit ?")) {
+                                        stmt.setInt(1, effectiveLimit);
+                                        try (ResultSet rs = stmt.executeQuery()) {
+                                                while (rs.next()) {
+                                                        rowsRead.incrementAndGet();
+                                                }
+                                        }
+                                        successfulQueries.incrementAndGet();
+                                } catch (Exception e) {
+                                        failedQueries.incrementAndGet();
+                                } finally {
+                                        latch.countDown();
+                                }
+                        });
+                }
+
+                try {
+                        latch.await();
+                } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                } finally {
+                        executor.shutdown();
+                        try {
+                                executor.awaitTermination(30, TimeUnit.SECONDS);
+                        } catch (InterruptedException ie) {
+                                Thread.currentThread().interrupt();
+                        }
+                }
+
+                long durationNanos = sample.stop(Timer.builder("adt.db.query.concurrent-load")
+                                .description("Paralleltest mit " + effectiveUsers + " virtuellen Nutzern")
+                                .register(meterRegistry));
+                long durationMillis = Duration.ofNanos(durationNanos).toMillis();
+                String description = "Paralleler Lasttest mit " + effectiveUsers + " Nutzern und Limit " + effectiveLimit
+                                + " pro Anfrage";
+
+                return new ConcurrentLoadResultDTO(effectiveUsers, durationMillis, rowsRead.get(),
+                                successfulQueries.get(), failedQueries.get(), description);
         }
 
         private QueryPerformanceDTO runTimedQuery(
