@@ -23,6 +23,7 @@ Diese Quarkus-Anwendung importiert Filmdaten aus der TMDB-API (The Movie Databas
 | `GET` | `/db/metrics/language-filter?language={iso}&limit={n}` | Indexfreundliche Filterung nach `original_language`. |
 | `GET` | `/db/metrics/recent-popular?startYear={jahr}&limit={n}` | Kombinierte Filterung auf `release_date` und Popularität (performant). |
 | `GET` | `/db/metrics/load-test?iterations={anzahl}&limit={n}` | Führt mehrere Queries sequenziell aus, um spürbare DB-Last zu erzeugen. |
+| `GET` | `/db/observability` | Snapshot für Pool-Auslastung (Agroal) und Postgres-Runtime-Metriken (Locks, Autovacuum, Checkpoints). |
 | `GET` | `/db/maintenance/analyze` | Stößt ein `ANALYZE` an, damit der Planner aktuelle Statistiken nutzt. |
 | `GET` | `/db/maintenance/explain/release-range?startYear={jahr}&endYear={jahr}&limit={n}` | Zeigt den Explain-Plan der indexfreundlichen Range-Abfrage. |
 | `GET` | `/db/maintenance/explain/year-extraction?year={jahr}&limit={n}` | Zeigt den Explain-Plan der unperformanten Jahres-Extraktion. |
@@ -60,6 +61,8 @@ Die Datenbanktabellen werden über Flyway-Migrationen bereitgestellt (`/flyway`-
   - Statistiken aktuell halten: `/db/maintenance/analyze` triggert ein `ANALYZE`, alternativ regelmäßig via Cron oder nach großen Imports ausführen.
   - `EXPLAIN (ANALYZE, BUFFERS)` aus den Explain-Endpunkten nutzen, um die Indexnutzung sichtbar zu machen und I/O-Kosten zu erkennen.
   - Autovacuum-/Planner-Parameter anpassen, wenn dauerhaft hohe Last oder viele Änderungen auftreten.
+- Neue Telemetrie: `/db/observability` liefert Pool-Auslastung (aktiv/verfügbar/warte) und Postgres-Runtime-Metriken (Lock-Waits, Autovacuum-Prozesse, Checkpoints) und meldet sie parallel als Micrometer-Gauges (Prometheus).
+- **Präsentationsleitfaden**: Ideen für eine anschauliche DB-Performance-Demo mit geringem Setup-Aufwand findest du in `docs/db-performance-presentation.md`.
 
 ## DB-Last mit den Metrik-Endpunkten erzeugen
 1. Anwendung starten (z. B. `./mvnw quarkus:dev`) und sicherstellen, dass Prometheus/ Micrometer aktiviert ist.
