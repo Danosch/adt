@@ -90,7 +90,7 @@ public class DatabaseMetricsResourceImpl implements DatabaseMetricsResource {
 
         @Override
         @Timed(value = "adt.http.db.concurrent-load", description = "Simulierte parallele DB-Zugriffe")
-        public ConcurrentLoadResultDTO runConcurrentLoad(int virtualUsers, int limitPerUser) {
-                return metricsService.runConcurrentLoad(virtualUsers, limitPerUser);
+        public ConcurrentLoadResultDTO runConcurrentLoad(int virtualUsers, int limitPerUser, int durationSeconds) {
+                return metricsService.runConcurrentLoad(virtualUsers, limitPerUser, durationSeconds);
         }
 }

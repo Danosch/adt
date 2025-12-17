@@ -259,9 +259,10 @@ public class DatabaseMetricsService extends BaseRepository {
          * Simuliert parallele Datenbankzugriffe mit frei wählbarer Nutzerzahl.
          */
         @Timed(value = "adt.db.query.concurrent-load", description = "Parallelisierung vieler kleiner DB-Reads")
-        public ConcurrentLoadResultDTO runConcurrentLoad(int virtualUsers, int limitPerUser) {
+        public ConcurrentLoadResultDTO runConcurrentLoad(int virtualUsers, int limitPerUser, int durationSeconds) {
                 int effectiveUsers = Math.max(1, virtualUsers);
                 int effectiveLimit = Math.max(1, limitPerUser);
+                int effectiveDurationSeconds = Math.max(1, durationSeconds);
 
                 ExecutorService executor = Executors.newFixedThreadPool(Math.min(effectiveUsers, 2000));
                 CountDownLatch latch = new CountDownLatch(effectiveUsers);
@@ -270,21 +271,27 @@ public class DatabaseMetricsService extends BaseRepository {
                 AtomicLong rowsRead = new AtomicLong();
 
                 Timer.Sample sample = Timer.start(meterRegistry);
+                long testEndTimeNanos = System.nanoTime()
+                                + TimeUnit.SECONDS.toNanos(effectiveDurationSeconds);
 
                 for (int i = 0; i < effectiveUsers; i++) {
                         executor.submit(() -> {
-                                try (Connection connection = dataSource.getConnection();
-                                                PreparedStatement stmt = connection.prepareStatement(
-                                                                "select id from movie order by id desc limit ?")) {
-                                        stmt.setInt(1, effectiveLimit);
-                                        try (ResultSet rs = stmt.executeQuery()) {
-                                                while (rs.next()) {
-                                                        rowsRead.incrementAndGet();
+                                try {
+                                        while (System.nanoTime() < testEndTimeNanos) {
+                                                try (Connection connection = dataSource.getConnection();
+                                                                PreparedStatement stmt = connection.prepareStatement(
+                                                                                "select id from movie order by id desc limit ?")) {
+                                                        stmt.setInt(1, effectiveLimit);
+                                                        try (ResultSet rs = stmt.executeQuery()) {
+                                                                while (rs.next()) {
+                                                                        rowsRead.incrementAndGet();
+                                                                }
+                                                        }
+                                                        successfulQueries.incrementAndGet();
+                                                } catch (Exception e) {
+                                                        failedQueries.incrementAndGet();
                                                 }
                                         }
-                                        successfulQueries.incrementAndGet();
-                                } catch (Exception e) {
-                                        failedQueries.incrementAndGet();
                                 } finally {
                                         latch.countDown();
                                 }
@@ -305,11 +312,12 @@ public class DatabaseMetricsService extends BaseRepository {
                 }
 
                 long durationNanos = sample.stop(Timer.builder("adt.db.query.concurrent-load")
-                                .description("Paralleltest mit " + effectiveUsers + " virtuellen Nutzern")
+                                .description("Paralleltest mit " + effectiveUsers + " virtuellen Nutzern über "
+                                                + effectiveDurationSeconds + " Sekunden")
                                 .register(meterRegistry));
                 long durationMillis = Duration.ofNanos(durationNanos).toMillis();
-                String description = "Paralleler Lasttest mit " + effectiveUsers + " Nutzern und Limit " + effectiveLimit
-                                + " pro Anfrage";
+                String description = "Paralleler Lasttest mit " + effectiveUsers + " Nutzern, Limit " + effectiveLimit
+                                + " pro Anfrage und Laufzeit " + effectiveDurationSeconds + " Sekunden";
 
                 return new ConcurrentLoadResultDTO(effectiveUsers, durationMillis, rowsRead.get(),
                                 successfulQueries.get(), failedQueries.get(), description);
