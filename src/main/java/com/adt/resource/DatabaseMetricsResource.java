@@ -7,6 +7,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 
+import com.adt.entity.dto.ConcurrentLoadResultDTO;
 import com.adt.entity.dto.QueryPerformanceDTO;
 
 /**
@@ -100,9 +101,18 @@ public interface DatabaseMetricsResource {
 	/**
 	 * Führt mehrere Abfragen sequenziell aus, um die Datenbank spürbar zu belasten.
 	 */
-	@GET
-	@Path("/load-test")
-	QueryPerformanceDTO runLoadTest(
-			@QueryParam("iterations") @DefaultValue("5") int iterations,
-			@QueryParam("limit") @DefaultValue("150") int limit);
+        @GET
+        @Path("/load-test")
+        QueryPerformanceDTO runLoadTest(
+                        @QueryParam("iterations") @DefaultValue("5") int iterations,
+                        @QueryParam("limit") @DefaultValue("150") int limit);
+
+        /**
+         * Simuliert viele gleichzeitige Zugriffe auf die Datenbank, um den Connection Pool und Locks zu belasten.
+         */
+        @GET
+        @Path("/concurrent-load")
+        ConcurrentLoadResultDTO runConcurrentLoad(
+                        @QueryParam("virtualUsers") @DefaultValue("1000") int virtualUsers,
+                        @QueryParam("limit") @DefaultValue("25") int limitPerUser);
 }

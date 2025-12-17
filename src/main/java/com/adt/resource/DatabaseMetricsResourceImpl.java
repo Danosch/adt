@@ -3,6 +3,7 @@ package com.adt.resource;
 import jakarta.inject.Inject;
 
 import com.adt.entity.dto.QueryPerformanceDTO;
+import com.adt.entity.dto.ConcurrentLoadResultDTO;
 import com.adt.service.DatabaseMetricsService;
 
 import io.micrometer.core.annotation.Timed;
@@ -85,5 +86,11 @@ public class DatabaseMetricsResourceImpl implements DatabaseMetricsResource {
         @Timed(value = "adt.http.db.load-test", description = "Mehrere Queries zum gezielten Belastungstest")
         public QueryPerformanceDTO runLoadTest(int iterations, int limit) {
                 return metricsService.runLoadScenario(iterations, limit);
+        }
+
+        @Override
+        @Timed(value = "adt.http.db.concurrent-load", description = "Simulierte parallele DB-Zugriffe")
+        public ConcurrentLoadResultDTO runConcurrentLoad(int virtualUsers, int limitPerUser) {
+                return metricsService.runConcurrentLoad(virtualUsers, limitPerUser);
         }
 }
