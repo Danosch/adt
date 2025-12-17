@@ -114,5 +114,6 @@ public interface DatabaseMetricsResource {
         @Path("/concurrent-load")
         ConcurrentLoadResultDTO runConcurrentLoad(
                         @QueryParam("virtualUsers") @DefaultValue("1000") int virtualUsers,
-                        @QueryParam("limit") @DefaultValue("25") int limitPerUser);
+                        @QueryParam("limit") @DefaultValue("25") int limitPerUser,
+                        @QueryParam("durationSeconds") @DefaultValue("30") int durationSeconds);
 }
