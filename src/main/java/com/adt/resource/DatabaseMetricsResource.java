@@ -101,19 +101,19 @@ public interface DatabaseMetricsResource {
 	/**
 	 * Führt mehrere Abfragen sequenziell aus, um die Datenbank spürbar zu belasten.
 	 */
-        @GET
-        @Path("/load-test")
-        QueryPerformanceDTO runLoadTest(
-                        @QueryParam("iterations") @DefaultValue("5") int iterations,
-                        @QueryParam("limit") @DefaultValue("150") int limit);
+	@GET
+	@Path("/load-test")
+	QueryPerformanceDTO runLoadTest(
+			@QueryParam("iterations") @DefaultValue("5") int iterations,
+			@QueryParam("limit") @DefaultValue("150") int limit);
 
-        /**
-         * Simuliert viele gleichzeitige Zugriffe auf die Datenbank, um den Connection Pool und Locks zu belasten.
-         */
-        @GET
-        @Path("/concurrent-load")
-        ConcurrentLoadResultDTO runConcurrentLoad(
-                        @QueryParam("virtualUsers") @DefaultValue("1000") int virtualUsers,
-                        @QueryParam("limit") @DefaultValue("25") int limitPerUser,
-                        @QueryParam("durationSeconds") @DefaultValue("30") int durationSeconds);
+	/**
+	 * Simuliert viele gleichzeitige Zugriffe auf die Datenbank, um den Connection Pool und Locks zu belasten.
+	 */
+	@GET
+	@Path("/concurrent-load")
+	ConcurrentLoadResultDTO runConcurrentLoad(
+			@QueryParam("virtualUsers") @DefaultValue("80") int virtualUsers,
+			@QueryParam("limit") @DefaultValue("25") int limitPerUser,
+			@QueryParam("durationSeconds") @DefaultValue("30") int durationSeconds);
 }

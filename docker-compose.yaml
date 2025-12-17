@@ -37,6 +37,16 @@ services:
     ports:
       - "8080:8080"
 
+  postgres_exporter:
+    image: prometheuscommunity/postgres-exporter
+    environment:
+      DATA_SOURCE_NAME: "postgresql://tmdb:tmdb@postgres:5432/tmdb?sslmode=disable"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "9187:9187"
+
   prometheus:
     image: prom/prometheus:latest
     volumes:
