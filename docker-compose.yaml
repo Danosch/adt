@@ -59,5 +59,16 @@ services:
     ports:
       - "9090:9090"
 
+  grafana:
+    image: grafana/grafana-oss:latest
+    depends_on:
+      prometheus:
+        condition: service_started
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+
 volumes:
   pgdata:
+  grafana-data:
