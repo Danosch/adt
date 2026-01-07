@@ -69,6 +69,19 @@ services:
     volumes:
       - grafana-data:/var/lib/grafana
 
+  weave-scope:
+    image: weaveworks/scope:1.13.2
+    privileged: true
+    pid: "host"
+    network_mode: "host"
+    command:
+      - "--probe.docker=true"
+      - "--weave=false"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys/kernel/debug:/sys/kernel/debug
+      - /lib/modules:/lib/modules:ro
+
 volumes:
   pgdata:
   grafana-data:
